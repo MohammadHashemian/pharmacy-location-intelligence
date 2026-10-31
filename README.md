@@ -777,8 +777,9 @@ baseline (5,408 residents per pharmacy in this dataset).
 ### Commands
 
 ```bash
-python etl/build_map_layer.py --check   # ~5 s: graph, density, polygons, asserts
-node web/scripts/proof-map.mjs          # headless Chrome: screenshots + interaction assertions
+python etl/build_map_layer.py --check           # ~5 s: graph, density, polygons, asserts
+node web/scripts/proof-map.mjs                  # headless Chrome: screenshots + interaction assertions
+node web/scripts/probe-map-layout.mjs URL W H   # layout/overflow/label-size audit at any viewport
 ```
 
 It writes `web/public/geo/khuzestan_bakhsh_areas.geojson` (67 filled بخش
@@ -823,6 +824,16 @@ panel opens with the same figures), clicks a ring row (radius 300 km, table
 re-scoped), toggles the layers (3,676 network lines appear, 0 admin paths when
 off), zooms (transform `scale(1)` → `scale(2.25)`, labels 30 → 79) and searches
 (rows 408 → 226). `next build` compiles the route as a partial prerender.
+
+`probe-map-layout.mjs` sweeps the breakpoints and prints the numbers the layout
+must satisfy: **no horizontal overflow at 390 / 768 / 1024 / 1280 / 1568 / 1920**
+(`scrollWidth == clientWidth`), the four cards inside their grid, and labels that
+render at a constant **18 px line box** at every width. Two defects it found and
+this fixed: the portrait SVG's intrinsic width widened a 390 px viewport to
+510 px, and the 720 px candidate table did the same at 768 px — both were missing
+`min-w-0` on the grid children. Labels are sized in CSS pixels (measured from a
+`ResizeObserver`) rather than viewBox units, so they stay legible on a phone, and
+their collision boxes follow the text baseline instead of the anchor point.
 
 ### Known limits
 

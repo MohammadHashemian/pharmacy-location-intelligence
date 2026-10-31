@@ -20,6 +20,7 @@
  */
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -291,7 +292,32 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     Math.round((data.meta.residentsPerPharmacy || 5400) / 100) * 100,
   );
 
+  /** Phones: the viewBox is scaled to ~340 px, so the same font size renders at
+      half the pixels. Labels get a boost and the dehestan tier is dropped. */
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const sync = () => setCompact(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
   const svgRef = useRef<SVGSVGElement | null>(null);
+  /** SVG user units per CSS pixel. A font size in user units is multiplied by
+      the viewBox→CSS ratio, so 12 units is 12 px on a 660 px-wide frame and 6 px
+      on a 348 px phone — labels must be divided by this to stay legible. */
+  const [unitsPerPx, setUnitsPerPx] = useState(1);
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const sync = () =>
+      setUnitsPerPx(W / Math.max(1, el.getBoundingClientRect().width));
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
   const indexOf = useMemo(() => {
@@ -590,15 +616,18 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const labelLayer = useMemo(() => {
     if (!layers.labels) return null;
     const k = view.k;
+    const u = unitsPerPx;
     const out: ReactNode[] = [];
     /* Greedy declutter. Labels live in scene units and are counter-scaled by
        1/k, so their on-screen size stays constant — which means the collision
        boxes only fit more labels as you zoom in, never fewer. */
     const boxes: { x1: number; y1: number; x2: number; y2: number }[] = [];
     const place = (x: number, y: number, text: string, size: number): boolean => {
-      const w = text.length * size * 0.64 + 4 / k;
-      const h = size * 1.2 + 3 / k;
-      const b = { x1: x - w / 2, y1: y - h / 2, x2: x + w / 2, y2: y + h / 2 };
+      const w = text.length * size * 0.8 + 5 / k;
+      const h = size * 1.25 + 4 / k;
+      // SVG text sits on a baseline, not centred on y: the glyph box is mostly
+      // above the anchor, which is exactly where the boxes have to collide
+      const b = { x1: x - w / 2, y1: y - h * 0.95, x2: x + w / 2, y2: y + h * 0.35 };
       for (const o of boxes) {
         if (!(b.x2 < o.x1 || b.x1 > o.x2 || b.y2 < o.y1 || b.y1 > o.y2)) return false;
       }
@@ -625,7 +654,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         x: c.x,
         y: c.y,
         text: shortCounty(c.name),
-        size: 12,
+        size: 12 * u,
         weight: 700,
         fill: "#1e293b",
         opacity: 0.82,
@@ -639,7 +668,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           x: b.lx,
           y: b.ly,
           text: strip(b.name, "بخش "),
-          size: 8,
+          size: 9 * u,
           weight: 500,
           fill: "#475569",
           opacity: 0.7,
@@ -647,14 +676,14 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         });
       }
     }
-    if (k >= 3.4) {
+    if (k >= 3.4 && !compact) {
       for (const d of scene.dehestans) {
         labels.push({
           key: `d${d.name}`,
           x: d.x,
           y: d.y,
           text: strip(d.name, "دهستان "),
-          size: 7,
+          size: 8 * u,
           weight: 400,
           fill: "#64748b",
           opacity: 0.68,
@@ -666,7 +695,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       const vis = settlements.filter(
         (s) => inside[indexOf.get(s.id) ?? 0] === 1 && (s.pop ?? 0) >= 120,
       );
-      for (const s of vis.slice(0, 160)) {
+      for (const s of vis.slice(0, compact ? 70 : 160)) {
         const i = indexOf.get(s.id)!;
         const p = scene.pts[i];
         labels.push({
@@ -674,7 +703,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           x: p.x,
           y: p.y - (p.r + 1.8) / k,
           text: `${s.name} ${group(s.pop)}`,
-          size: 6.4,
+          size: 7.5 * u,
           weight: 500,
           fill: "#0f172a",
           opacity: 0.9,
@@ -705,14 +734,16 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       );
     }
     return <g pointerEvents="none">{out}</g>;
-  }, [scene, settlements, layers.labels, view.k, inside, indexOf]);
+  }, [scene, settlements, layers.labels, view.k, inside, indexOf, compact, unitsPerPx]);
 
   const hoverS = hover ? settlements[hover.i] : null;
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
       {/* ------------------------------------------------------------ map -- */}
-      <div className="mx-auto w-full max-w-[900px] rounded-2xl border border-line bg-surface p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)] lg:sticky lg:top-3 lg:self-start">
+      <div
+        style={{ maxWidth: "min(100%, 760px, calc(88vh * 0.805))" }}
+        className="mx-auto w-full min-w-0 rounded-2xl border border-line bg-surface p-2 shadow sm:p-3-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)] xl:sticky xl:top-3 xl:self-start">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[13px] font-semibold text-ink">
@@ -722,7 +753,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               {group(settlements.length)} نقطه · {group(scene.cells.length)} سلول مسکونی
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex w-full flex-wrap items-center gap-1 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:pb-1">
             {(
               [
                 ["dens", "تراکم داروخانه"],
@@ -770,11 +801,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           </div>
         </div>
 
-        <div className="relative mx-auto w-fit max-w-full">
+        <div className="relative mx-auto w-full min-w-0">
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
-            style={{ height: "clamp(440px, 72vh, 880px)", width: "auto", maxWidth: "100%" }}
+            style={{ width: "100%", aspectRatio: `${W} / ${H}`, height: "auto" }}
             className="block cursor-crosshair rounded-xl border border-line bg-[#f8fafc]"
             onWheel={onWheel}
             onPointerMove={onPointerMove}
@@ -902,7 +933,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             ))}
           </div>
 
-          <div className="absolute bottom-2 right-2 rounded-lg border border-line bg-surface/95 px-2 py-1.5 shadow-sm">
+          <div className="absolute bottom-2 right-2 hidden rounded-lg border border-line bg-surface/95 px-2 py-1.5 shadow-sm sm:block">
             <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-muted">
               <span>{mode === "dens" ? "کمتر" : "بدون شکاف"}</span>
               <span>{mode === "dens" ? "بیشتر" : "شکاف بیشتر"}</span>
@@ -919,7 +950,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
           {hoverS ? (
             <div
-              className="pointer-events-none absolute z-10 w-56 rounded-lg border border-line bg-surface/98 p-2 text-[11px] shadow-lg"
+              className="pointer-events-none absolute z-10 w-56 max-w-[72vw] rounded-lg border border-line bg-surface/98 p-2 text-[11px] shadow-lg"
               style={{
                 left: Math.max(
                   4,
@@ -983,7 +1014,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       </div>
 
       {/* --------------------------------------------------------- sidebar -- */}
-      <div className="flex flex-col gap-3">
+      <div className="flex min-w-0 flex-col gap-3">
         <div className="rounded-2xl border border-line bg-surface p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-[13px] font-semibold text-ink">گسترش از اهواز</span>
@@ -1035,7 +1066,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             </div>
           </div>
 
-          <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-line">
+          <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-line [scrollbar-gutter:stable]">
             <table className="w-full text-[10.5px]">
               <thead className="sticky top-0 bg-surface-2 text-muted">
                 <tr>
@@ -1157,7 +1188,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       </div>
 
       {/* ---------------------------------------------------------- table -- */}
-      <div className="rounded-2xl border border-line bg-surface p-3 lg:col-span-2">
+      <div className="min-w-0 rounded-2xl border border-line bg-surface p-3 lg:col-span-2">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[13px] font-semibold text-ink">
@@ -1239,8 +1270,8 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           </div>
         ) : null}
 
-        <div className="max-h-[420px] overflow-auto rounded-lg border border-line">
-          <table className="w-full border-collapse text-[11px]">
+        <div className="max-h-[420px] overflow-auto rounded-lg border border-line [scrollbar-gutter:stable]">
+          <table className="w-full min-w-[720px] border-collapse text-[11px]">
             <thead className="sticky top-0 z-1 bg-surface-2 text-muted">
               <tr>
                 <th className="px-2 py-1.5 text-right font-medium">نام</th>
@@ -1301,7 +1332,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       </div>
 
       {/* -------------------------------------------------------- coverage -- */}
-      <div className="rounded-2xl border border-line bg-surface p-3 lg:col-span-2">
+      <div className="min-w-0 rounded-2xl border border-line bg-surface p-3 lg:col-span-2">
         <div className="grid gap-2 text-[11px] leading-5 text-muted sm:grid-cols-2 lg:grid-cols-3">
           <p>
             <b className="text-ink">پوشش مکانی:</b> {group(data.meta.nPlotted)} سکونتگاه از{" "}
