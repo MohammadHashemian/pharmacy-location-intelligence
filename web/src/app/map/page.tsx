@@ -88,7 +88,7 @@ function Loading() {
 
 export default function Page() {
   return (
-    <main className="mx-auto max-w-[1560px] px-3 py-5 sm:px-5 sm:py-6">
+    <main className="mx-auto max-w-[1240px] px-3 py-5 sm:px-5 sm:py-6">
       <Suspense fallback={<Loading />}>
         <LiveMap />
       </Suspense>

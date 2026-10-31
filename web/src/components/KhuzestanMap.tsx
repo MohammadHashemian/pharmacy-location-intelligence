@@ -749,7 +749,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             <span className="text-[13px] font-semibold text-ink">
               نقشهٔ سکونتگاه‌ها و تراکم داروخانه
             </span>
-            <span className="rounded-md border border-line-strong bg-surface-2 px-1.5 py-0.5 text-[10.5px] text-muted">
+            <span className="whitespace-nowrap rounded-md border border-line-strong bg-surface-2 px-1.5 py-0.5 text-[10.5px] text-muted">
               {group(settlements.length)} نقطه · {group(scene.cells.length)} سلول مسکونی
             </span>
           </div>
