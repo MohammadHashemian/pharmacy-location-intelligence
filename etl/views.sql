@@ -354,3 +354,118 @@ LEFT JOIN salname_metrics sp
       AND sp.dimension = 'total'
       AND REPLACE(sp.county_key, ' ', '') = REPLACE(TRIM(REPLACE(l.county, 'شهرستان', '')), ' ', '')
 ORDER BY l.fda_pharmacies DESC;
+
+-- ---------------------------------------------------------------------------
+-- 14. Buying-power INPUTS for the over-the-counter (بدون نسخه) model.
+--
+--     The FDA feed answers "how many prescriptions". It says nothing about the
+--     half of a pharmacy's business that is paid out of pocket: cosmetics,
+--     supplements, OTC drugs — the part whose size depends on how well-off the
+--     catchment is, not on how many people live there. This view supplies the
+--     INPUTS only; the model itself is pure and lives in web/src/lib/otc.ts so
+--     the user can re-tune it live.
+--
+--     Two signals, both from data already in the database:
+--
+--     1. county_urban_share — what fraction of the county's population lives in
+--        a settlement that is a city, or large (>= 10,000), or already sustains
+--        3+ pharmacies. That is the "urbanisation" of the neighbourhood, which
+--        is the single strongest observable driver of household spending.
+--        Computed from population counts, NOT from the «شهر» name prefix: the
+--        prefix is unreliable at the top end (تهران بزرگ is labelled 'other'),
+--        and a name-based urbanisation measure reports 0% urban for تهران.
+--        Rows already flagged pop_outlier are excluded from the aggregate
+--        because a mis-joined metro population (تجریش carrying Tehran's 8.15 M)
+--        would otherwise make شمیرانات look like a metropolis of 8.2 M people.
+--
+--     2. hh_size — persons per household, from the corroborated census figure
+--        (population_reference.households). Smaller households correlate with
+--        urban, higher-income living; NULL when no reference value resolved,
+--        and NULL is treated as "no information", never as an average.
+-- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS v_place_prosperity;
+CREATE VIEW v_place_prosperity AS
+WITH county_pop AS (
+    SELECT province, county,
+           SUM(population) AS county_population,
+           SUM(CASE WHEN place_kind = 'city'
+                          OR population >= 10000
+                          OR (COALESCE(n_pharmacy_real, 0)
+                              + COALESCE(n_pharmacy_legal, 0)) >= 3
+                    THEN population ELSE 0 END) AS county_urban_population
+    FROM v_metrics
+    WHERE population > 0
+      AND (dq_flags IS NULL OR dq_flags NOT LIKE '%pop_outlier%')
+    GROUP BY province, county
+)
+SELECT
+    m.location_id,
+    m.province,
+    m.county,
+    m.place,
+    m.place_kind,
+    cp.county_population,
+    CASE WHEN cp.county_population > 0
+         THEN ROUND(cp.county_urban_population * 1.0 / cp.county_population, 4)
+    END                                                       AS county_urban_share,
+    -- persons per household, only where the census reference actually resolved
+    CASE WHEN m.ref_population > 0 AND m.ref_households > 0
+         THEN ROUND(m.ref_population * 1.0 / m.ref_households, 2)
+    END                                                       AS hh_size,
+    m.has_reference
+FROM v_population_choice m
+LEFT JOIN county_pop cp
+       ON cp.province = m.province AND cp.county = m.county;
+
+-- ---------------------------------------------------------------------------
+-- 15. The official anchor for the OTC model.
+--
+--     The model needs one external number it cannot invent: how much a household
+--     in this part of the country spends per year. The provincial yearbook
+--     (سالنامه ۱۴۰۳ خوزستان, chapter 21) publishes exactly that, for urban and
+--     rural households, plus the 1395 census population/household counts that
+--     turn it into a PER-PERSON figure.
+--
+--     What the dashboard does with it:
+--       * rural_to_urban_ratio          — the measured relative spending power of
+--         a village vs a city, used instead of a guessed 0.6;
+--       * consumption_per_capita_1403   — the level the default OTC-per-capita
+--         assumption is derived from (see DEFAULT OTC in lib/otc.ts).
+--
+--     Scope caveat, stated plainly: the yearbook is Khuzestan's. Outside the
+--     province no equivalent figure is loaded, so the model treats the ratio as
+--     national and says so in the UI. Nothing here is extrapolated per county —
+--     the numbers are provincial aggregates and are labelled as such.
+-- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS v_otc_anchors;
+CREATE VIEW v_otc_anchors AS
+WITH exp AS (
+    SELECT MAX(CASE WHEN dimension = 'urban' THEN value END) AS urban_hh_exp,
+           MAX(CASE WHEN dimension = 'rural' THEN value END) AS rural_hh_exp
+    FROM salname_metrics
+    WHERE metric = 'household_expenditure' AND year_sh = 1403
+),
+hh AS (
+    SELECT SUM(CASE WHEN metric = 'population' AND dimension = 'urban' THEN value ELSE 0 END) AS urban_pop,
+           SUM(CASE WHEN metric = 'population' AND dimension = 'rural' THEN value ELSE 0 END) AS rural_pop,
+           SUM(CASE WHEN metric = 'households' AND dimension = 'urban' THEN value ELSE 0 END) AS urban_hh,
+           SUM(CASE WHEN metric = 'households' AND dimension = 'rural' THEN value ELSE 0 END) AS rural_hh
+    FROM salname_metrics
+    WHERE scope = 'county' AND year_sh = 1395
+),
+sizes AS (
+    SELECT ROUND(urban_pop * 1.0 / NULLIF(urban_hh, 0), 2) AS urban_hh_size,
+           ROUND(rural_pop * 1.0 / NULLIF(rural_hh, 0), 2) AS rural_hh_size
+    FROM hh
+)
+SELECT
+    1403                                                      AS year_sh,
+    'سالنامه آماری خوزستان'                                   AS source,
+    e.urban_hh_exp                                            AS urban_hh_expenditure,
+    e.rural_hh_exp                                            AS rural_hh_expenditure,
+    ROUND(e.rural_hh_exp * 1.0 / NULLIF(e.urban_hh_exp, 0), 3) AS rural_to_urban_ratio,
+    s.urban_hh_size,
+    s.rural_hh_size,
+    ROUND(e.urban_hh_exp / NULLIF(s.urban_hh_size, 0), 0)     AS urban_consumption_per_capita,
+    ROUND(e.rural_hh_exp / NULLIF(s.rural_hh_size, 0), 0)     AS rural_consumption_per_capita
+FROM exp e, sizes s;

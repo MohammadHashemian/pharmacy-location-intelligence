@@ -8,7 +8,8 @@ import {
   type UnitEconomics,
   type Weights,
 } from "@/lib/analytics";
-import { group } from "@/lib/format";
+import type { OtcAnchors } from "@/lib/data";
+import { group, irr, num } from "@/lib/format";
 
 export interface Preset {
   id: string;
@@ -22,39 +23,93 @@ export const PRESETS: Preset[] = [
   {
     id: "balanced",
     label: "متوازن",
-    hint: "وزن‌های پیش‌فرض: بازار، ظرفیت خالی، صف متقاضیان و سد اداری همه مؤثر",
-    weights: { demand: 30, headroom: 40, pipeline: 20, barrier: 10 },
+    hint: "وزن‌های پیش‌فرض: بازار، ظرفیت خالی، تحمل ورود، صف متقاضیان، سد اداری و قدرت خرید",
+    weights: {
+      demand: 25,
+      headroom: 10,
+      pipeline: 15,
+      barrier: 10,
+      affluence: 20,
+      tolerance: 20,
+    },
   },
   {
     id: "bigmarket",
     label: "بازار بزرگ",
     hint: "اولویت جمعیت؛ شهرهای پرجمعیت حتی با رقابت بیشتر",
-    weights: { demand: 70, headroom: 15, pipeline: 10, barrier: 5 },
+    weights: {
+      demand: 55,
+      headroom: 6,
+      pipeline: 7,
+      barrier: 5,
+      affluence: 12,
+      tolerance: 15,
+    },
     minPopulation: 50_000,
   },
   {
     id: "lowcompetition",
     label: "کمترین رقابت",
-    hint: "اولویت شهرهایی که نسبت داروخانه به جمعیت در آن‌ها پایین است",
-    weights: { demand: 15, headroom: 70, pipeline: 10, barrier: 5 },
+    hint: "اولویت شهرهایی که با ورود شما هم نسبت جمعیت به داروخانه‌شان بالاتر می‌مانَد",
+    weights: {
+      demand: 8,
+      headroom: 20,
+      pipeline: 6,
+      barrier: 4,
+      affluence: 12,
+      tolerance: 50,
+    },
   },
   {
     id: "easyentry",
     label: "ورود آسان",
     hint: "اولویت شهرهایی با حداقل امتیاز پایین‌تر (سد اداری کمتر)",
-    weights: { demand: 20, headroom: 15, pipeline: 15, barrier: 50 },
+    weights: {
+      demand: 16,
+      headroom: 8,
+      pipeline: 12,
+      barrier: 44,
+      affluence: 10,
+      tolerance: 10,
+    },
   },
   {
     id: "nopipeline",
     label: "بدون صف متقاضی",
     hint: "اولویت شهرهایی که متقاضی درحال‌جریان کمتری دارند",
-    weights: { demand: 25, headroom: 35, pipeline: 35, barrier: 5 },
+    weights: {
+      demand: 23,
+      headroom: 10,
+      pipeline: 28,
+      barrier: 5,
+      affluence: 14,
+      tolerance: 20,
+    },
+  },
+  {
+    id: "affluent",
+    label: "منطقهٔ برخوردار",
+    hint: "اولویت قدرت خرید محل — جایی که فروش بدون نسخه (آرایشی، مکمل) بیشتر است",
+    weights: {
+      demand: 13,
+      headroom: 8,
+      pipeline: 8,
+      barrier: 5,
+      affluence: 46,
+      tolerance: 20,
+    },
   },
 ];
 
-/** Normalised weight as a whole-number percentage (the four always sum to 100). */
+/** Normalised weight as a whole-number percentage (the six always sum to 100). */
 export function wPct(w: Weights, k: keyof Weights): number {
-  const sum = w.demand + w.headroom + w.pipeline + w.barrier || 1;
+  const sum =
+    w.demand +
+      w.headroom +
+      w.pipeline +
+      w.barrier +
+      w.affluence +
+      w.tolerance || 1;
   return Math.round((w[k] / sum) * 100);
 }
 
@@ -69,6 +124,7 @@ export function Controls({
   peerCount,
   targetAuto,
   scopePlaces,
+  otcAnchors,
 }: {
   tunables: Tunables;
   setTunables: (t: Tunables) => void;
@@ -81,6 +137,8 @@ export function Controls({
   targetAuto: number;
   /** Total analysis-scope places, before the population filter narrows the view. */
   scopePlaces: number;
+  /** Yearbook anchor behind the OTC defaults; null when it is not loaded. */
+  otcAnchors: OtcAnchors | null;
 }) {
   const setW = (k: keyof Weights, v: number) =>
     setTunables({ ...tunables, weights: { ...tunables.weights, [k]: v } });
@@ -135,7 +193,16 @@ export function Controls({
           max={100}
           onChange={(v) => setW("headroom", v)}
           display={`${wPct(tunables.weights, "headroom")}٪`}
-          hint="نسبت داروخانه به جمعیت پایین‌تر از هم‌رده‌ها."
+          hint="نسبت داروخانه به جمعیت پایین‌تر از هم‌رده‌ها — وضعیت امروز."
+        />
+        <Slider
+          label="تحمل داروخانهٔ جدید (وضعیت پس از ورود شما)"
+          value={tunables.weights.tolerance}
+          min={0}
+          max={100}
+          onChange={(v) => setW("tolerance", v)}
+          display={`${wPct(tunables.weights, "tolerance")}٪`}
+          hint="جمعیت ÷ (موجود + موافقت‌اصولی + ۱ شما): شهری که ۵٬۰۰۰ نفر و یک داروخانه دارد امروز عالی به‌نظر می‌رسد، اما با ورود شما ۲٬۵۰۰ نفر سهم هر داروخانه می‌شود. شهری با ۲۰٬۰۰۰ نفر و ۴ داروخانه کم‌تر آب می‌رود."
         />
         <Slider
           label="صف متقاضیان (ضد رقیب)"
@@ -154,6 +221,15 @@ export function Controls({
           onChange={(v) => setW("barrier", v)}
           display={`${wPct(tunables.weights, "barrier")}٪`}
           hint="هرچه «حداقل امتیاز» بالاتر، گرفتن مجوز سخت‌تر."
+        />
+        <Slider
+          label="قدرت خرید محل (فروش بدون نسخه)"
+          value={tunables.weights.affluence}
+          min={0}
+          max={100}
+          onChange={(v) => setW("affluence", v)}
+          display={`${wPct(tunables.weights, "affluence")}٪`}
+          hint="برخورداری منطقه: هرچه بالاتر، خرید آرایشی، بهداشتی و مکمل بیشتر — که حاشیهٔ سودش از نسخهٔ بیمه‌ای بیشتر است."
         />
       </div>
 
@@ -268,13 +344,84 @@ export function Controls({
               className="tnum mt-1 w-full rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
             />
           </label>
+          <label className="block">
+            <span className="text-xs font-medium text-ink-soft">
+              فروش بدون نسخه به‌ازای هر نفر در سال (ریال)
+            </span>
+            <input
+              type="number"
+              step={1_000_000}
+              min={0}
+              value={economics.otcPerCapitaIRR}
+              onChange={(e) =>
+                setEconomics({
+                  ...economics,
+                  otcPerCapitaIRR: Number(e.target.value),
+                })
+              }
+              className="tnum mt-1 w-full rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-ink-soft">
+              کشش درآمدی فروش بدون نسخه
+            </span>
+            <input
+              type="number"
+              step={0.1}
+              min={0}
+              max={3}
+              value={economics.otcElasticity}
+              onChange={(e) =>
+                setEconomics({
+                  ...economics,
+                  otcElasticity: Number(e.target.value),
+                })
+              }
+              className="tnum mt-1 w-full rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+            />
+          </label>
         </div>
         <p className="mt-2 text-[11px] leading-4 text-faint">
-          این دو عدد اندازه‌گیری‌شده نیستند؛ مقادیر پیش‌فرض فقط برای فعال کردن
-          ستون «درآمد برآوردی» است. با اعداد واقعی خودتان جایگزین کنید تا مقایسه
-          معنا پیدا کند. برآورد = جمعیت × نسخه‌سرانه ÷ (تعداد داروخانه + ۱) ×
-          حاشیه سود.
+          این اعداد اندازه‌گیری‌شده نیستند؛ مقادیر پیش‌فرض فقط برای فعال کردن
+          ستون‌های «درآمد برآوردی» و «فروش بدون نسخه» است. با اعداد واقعی خودتان
+          جایگزین کنید تا مقایسه معنا پیدا کند. برآورد نسخه = جمعیت × نسخه‌سرانه ÷
+          (تعداد داروخانه + ۱) × حاشیه سود. برآورد بدون نسخه = جمعیت × (فروش سرانه
+          × قدرت خرید<sup>کشش</sup>) ÷ (تعداد داروخانه + ۱).
         </p>
+        <div className="mt-2 rounded-xl border border-line bg-surface-2 px-3 py-2 text-[11px] leading-5 text-ink-soft">
+          <b>لنگر رسمی مدل بدون نسخه:</b>{" "}
+          {otcAnchors?.urban_hh_expenditure ? (
+            <>
+              هزینهٔ سالانهٔ هر خانوار شهری در سالنامهٔ آماری استان ۱۴۰۳:{" "}
+              <b className="tnum">{irr(otcAnchors.urban_hh_expenditure)}</b> · روستایی:{" "}
+              <b className="tnum">{irr(otcAnchors.rural_hh_expenditure)}</b> · یعنی
+              روستا حدود{" "}
+              <b className="tnum">{num((otcAnchors.rural_to_urban_ratio ?? 0) * 100, 0)}٪</b>{" "}
+              شهر مصرف می‌کند. همین نسبت، ضریب روستا در مدل است — اندازه‌گیری‌شده،
+              نه فرضی.
+              {otcAnchors.urban_consumption_per_capita ? (
+                <>
+                  {" "}
+                  مصرف سرانهٔ شهری ≈{" "}
+                  <b className="tnum">
+                    {irr(otcAnchors.urban_consumption_per_capita)}
+                  </b>
+                  ؛ پیش‌فرض بالا ۲٪ آن با فرض رشد قیمت تا امروز است.
+                </>
+              ) : null}
+            </>
+          ) : (
+            <>
+              سالنامهٔ استانی بارگذاری نشده است، بنابراین نسبت روستا/شهر و سطح
+              پولی از مقادیر پیش‌فرضِ مستند در{" "}
+              <span dir="ltr" className="tnum">
+                lib/otc.ts
+              </span>{" "}
+              می‌آید، نه از دادهٔ رسمی.
+            </>
+          )}
+        </div>
         <Button
           className="mt-2"
           onClick={() => setEconomics(DEFAULT_ECONOMICS)}

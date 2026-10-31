@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DashboardData } from "@/lib/data";
 import {
@@ -13,7 +14,8 @@ import {
   type Tunables,
   type UnitEconomics,
 } from "@/lib/analytics";
-import { group, num, shortPlace } from "@/lib/format";
+import { suggestPerCapita } from "@/lib/otc";
+import { group, irr, num, shortPlace } from "@/lib/format";
 import { jalaliFromIso } from "@/lib/jalali";
 import { Controls, PRESETS, wPct, type Preset } from "./Controls";
 import { DensityHistogram, ScatterChart, TopBars } from "./Charts";
@@ -31,7 +33,17 @@ export function Dashboard({ data }: { data: DashboardData }) {
   const router = useRouter();
   const [tab, setTab] = useState<TabId>("rank");
   const [tunables, setTunables] = useState<Tunables>(DEFAULT_TUNABLES);
-  const [economics, setEconomics] = useState<UnitEconomics>(DEFAULT_ECONOMICS);
+  /* The OTC level is derived from the yearbook anchor when it is loaded (2% of
+     measured per-person consumption, carried to today's prices); without it the
+     documented fallback applies. Either way it is only a STARTING value — the
+     inputs in the model panel replace it. */
+  const [economics, setEconomics] = useState<UnitEconomics>(() => ({
+    ...DEFAULT_ECONOMICS,
+    otcPerCapitaIRR: suggestPerCapita(data.otcAnchors),
+    ruralToUrbanRatio:
+      data.otcAnchors?.rural_to_urban_ratio ??
+      DEFAULT_ECONOMICS.ruralToUrbanRatio,
+  }));
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [pinned, setPinned] = useState<number[]>([]);
   const [query, setQuery] = useState("");
@@ -61,8 +73,13 @@ export function Dashboard({ data }: { data: DashboardData }) {
       if (!tunables.showFlagged && p.warnings.length > 0) return false;
       // The population floor applies only to rows that have a usable
       // population — a row published with 0 people must not vanish because of a
-      // floor it can never clear.
-      if (p.scorable && (p.population ?? 0) < tunables.minPopulation)
+      // floor it can never clear. Cities are exempt: a small city is still a
+      // city, and hiding it is how the list looked incomplete.
+      if (
+        p.scorable &&
+        p.place_kind !== "city" &&
+        (p.population ?? 0) < tunables.minPopulation
+      )
         return false;
       if (q) {
         const hit =
@@ -225,6 +242,11 @@ export function Dashboard({ data }: { data: DashboardData }) {
   const top = visible.slice(0, 5);
   const totalPopCities = visible.reduce((a, p) => a + (p.population ?? 0), 0);
   const totalPhCities = visible.reduce((a, p) => a + p.n_pharmacy_total, 0);
+  const totalOtc = visible.reduce((a, p) => a + p.otc.market, 0);
+  const avgProsperity =
+    visible.length > 0
+      ? visible.reduce((a, p) => a + p.prosperity, 0) / visible.length
+      : 0;
   const avgDensity =
     totalPopCities > 0 ? (totalPhCities / totalPopCities) * 100_000 : 0;
   const importantHeldOut = heldOut.filter((h) => h.important);
@@ -243,8 +265,10 @@ export function Dashboard({ data }: { data: DashboardData }) {
               </h1>
               <p className="mt-1 max-w-3xl text-[12.5px] leading-5 text-muted">
                 بر پایهٔ دادهٔ ظرفیت داروخانهٔ سازمان غذا و دارو برای تمام ۳۱
-                استان. هر شهر با چهار مؤلفه سنجیده می‌شود: اندازهٔ بازار، ظرفیت
-                خالی، صف متقاضیان و سد اداری — وزن‌ها را خودتان تعیین می‌کنید.
+                استان. هر شهر با شش مؤلفه سنجیده می‌شود: اندازهٔ بازار، ظرفیت
+                خالی، تحمل داروخانهٔ جدید (نسبت جمعیت به داروخانه پس از ورود
+                شما)، صف متقاضیان، سد اداری و قدرت خرید — وزن‌ها را خودتان
+                تعیین می‌کنید.
               </p>
             </div>
             <div className="flex flex-col items-end gap-1.5">
@@ -268,11 +292,17 @@ export function Dashboard({ data }: { data: DashboardData }) {
                 >
                   ↻ به‌روزرسانی
                 </Button>
+                <Link
+                  href="/places"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-ink transition hover:bg-brand/15"
+                >
+                  همهٔ مکان‌ها و روستاها
+                </Link>
               </div>
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          <div className="mt-3 grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-5">
             <Stat
               label="بهترین گزینهٔ فعلی"
               value={top[0] ? shortPlace(top[0].place) : "—"}
@@ -297,6 +327,11 @@ export function Dashboard({ data }: { data: DashboardData }) {
               value={num(avgDensity, 1)}
               sub="داروخانه در ۱۰۰ هزار نفر"
               tone="accent"
+            />
+            <Stat
+              label="بازار بدون نسخه (سالانه)"
+              value={irr(totalOtc)}
+              sub={`میانگین برخورداری ${num(avgProsperity, 0)} از ۱۰۰`}
             />
             <Stat
               label="جمعیت مقایسه‌شده"
@@ -422,6 +457,7 @@ export function Dashboard({ data }: { data: DashboardData }) {
             peerCount={visible.length}
             targetAuto={targetAuto}
             scopePlaces={scoredAll.length}
+            otcAnchors={data.otcAnchors}
           />
         ) : null}
 
@@ -555,9 +591,11 @@ export function Dashboard({ data }: { data: DashboardData }) {
 
           <span className="tnum text-[11px] text-faint">
             · بازار {num(wPct(tunables.weights, "demand"), 0)}٪ · ظرفیت{" "}
-            {num(wPct(tunables.weights, "headroom"), 0)}٪ · صف{" "}
+            {num(wPct(tunables.weights, "headroom"), 0)}٪ · تحمل{" "}
+            {num(wPct(tunables.weights, "tolerance"), 0)}٪ · صف{" "}
             {num(wPct(tunables.weights, "pipeline"), 0)}٪ · سد اداری{" "}
-            {num(wPct(tunables.weights, "barrier"), 0)}٪ · حداقل جمعیت{" "}
+            {num(wPct(tunables.weights, "barrier"), 0)}٪ · برخورداری{" "}
+            {num(wPct(tunables.weights, "affluence"), 0)}٪ · حداقل جمعیت{" "}
             {group(tunables.minPopulation)}
           </span>
 

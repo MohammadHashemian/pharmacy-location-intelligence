@@ -159,7 +159,7 @@ if rows arrive by a path that never ran the ETL flags.
 
 ## How the ranking works
 
-Four dimensions, each reduced to a **percentile rank inside the peer set** (0–100),
+Six dimensions, each reduced to a **percentile rank inside the peer set** (0–100),
 then combined with user-tunable weights. Percentile ranking is robust to the heavy
 skew in this data and needs no distributional assumptions.
 
@@ -167,8 +167,22 @@ skew in this data and needs no distributional assumptions.
 |---|---|---|
 | اندازه بازار — market size | larger | log₁₀(population) |
 | ظرفیت خالی — head-room | less saturated | `pharmacies_per_100k` (lower is better) |
+| تحمل داروخانهٔ جدید — tolerance for one more | more patients per pharmacy *after* we open | `population / (committed + 1)` (higher is better) |
 | کم‌بودن صف متقاضی — pipeline | fewer rivals queued | `pipeline_ratio` (lower is better) |
 | سهولت ورود — entry barrier | lower permit threshold | `min_score` (lower is better) |
+| قدرت خرید محل — buying power | richer catchment | the OTC index below |
+
+Head-room asks how crowded the place is *today*; tolerance asks what it looks like
+*the day after we open* — the only state we would actually trade in. Its denominator
+counts **committed** pharmacies, not open ones: a permit that already holds
+موافقت‌اصولی opens whatever we do, so it splits the market exactly like an open
+pharmacy (`n_pharmacy_committed = real + legal + approved`). The same `committed + 1`
+denominator drives the entrant script and OTC estimates. A 5,000-person town with one
+pharmacy scores 5,000 patients per pharmacy today, but 2,500 once we are the second
+pharmacy; a 20,000-person town with four pharmacies gives up far less
+(5,000 → 4,000). Head-room and tolerance are therefore weighted 10/20 each by
+default: they measure nearly the same thing, and the post-entry one is the decision
+being made.
 
 `opportunity = Σ(weightᵢ × scoreᵢ) / Σweightᵢ`, computed live in the browser.
 
@@ -195,6 +209,108 @@ as inputs precisely so the “درآمد برآوردی” column is your assump
 Every formula lives in `etl/views.sql` (SQL) and `web/src/lib/analytics.ts` (TS),
 with the Python re-implementation in `etl/sanity_model.py` used to cross-check the
 browser's numbers.
+
+---
+
+## The out-of-pocket basket — «فروش بدون نسخه»
+
+Half of a pharmacy's business is not in the FDA feed at all. Insured prescriptions
+are paid by an insurer at a regulated margin; the part that actually decides
+whether a pharmacy thrives is the **out-of-pocket basket** — cosmetics, hygiene,
+supplements, OTC drugs — and its size depends on how well-off the catchment is,
+not on how many people live in it.
+
+Which breaks the population-only ranking. In this run:
+
+| place | kind | population | buying power | OTC per head | local market |
+|---|---|---|---|---|---|
+| جنت مکان | شهر | ۵٬۳۶۰ | ۰٫۹۲ | ۲۵٫۱ M ریال | ۱۳۴٫۶ bn ریال |
+| ای جنگیه | روستا | ۴٬۶۴۴ | ۰٫۵۴ | ۱۲٫۵ M ریال | ۵۷٫۹ bn ریال |
+
+Same size, **half** the out-of-pocket basket. That is the whole reason for the
+layer, and it is now a fifth scoring dimension (default weight 20%) and a money
+column (فروش بدون نسخه = the marginal entrant's share).
+
+### What is measured, what is assumed
+
+| Input | Value | Where it comes from |
+|---|---|---|
+| rural vs urban household spending | ۰٫۵۹۶ | **measured**: سالنامه ۱۴۰۳ خوزستان، ۱٬۵۶۰٬۸۷۳ ÷ ۲٬۶۱۸٬۴۶۰ |
+| county urbanisation | ۰٫۰۸ … ۰٫۹۹ | share of the county's people in a city / a place ≥ ۱۰٬۰۰۰ / a place with ≥ ۳ pharmacies (`v_place_prosperity`) |
+| persons per household | ۳٫۶ (شهری) / ۳٫۹ (روستایی) | census 1395, at province level; per-settlement when `population_reference` is loaded |
+| OTC+cosmetics share of consumption | ۲٪ | **assumption**, exposed as an input |
+| price growth since 1403 | ۱٫۸× | **assumption**, exposed as an input |
+| income elasticity | ۱٫۳ | **assumption**, exposed as an input |
+
+So the *shape* of the index is measured and the *level* of the money is the
+user's. That asymmetry is deliberate: the dashboard ranks places on measured
+structure, and prints money only from a number the user can replace.
+
+### The model
+
+`lib/otc.ts`, pure functions, cross-checked by `etl/sanity_model.py`:
+
+```
+power  = urbanity × county_urban × household × agglomeration
+         normalised so the population-weighted mean is exactly 1.0
+         (1.3 = "about 30% richer than the national average")
+
+perCapita = base × power^elasticity
+market    = population × perCapita
+yourShare = market ÷ (n_pharmacies + 1)      ← entry splits demand, it never creates it
+```
+
+Each factor is bounded (0.85–1.20, 0.85–1.15, 0.85–1.15) so no single freak
+input can invent a rich village, and all four are printed in the detail panel —
+the number is auditable, not opaque.
+
+**This run:** buying power spans ۰٫۴۲ … ۱٫۱۱, model market ۱٬۴۶۶ هزار میلیارد
+ریال/yr (≈ ۹۴٫۵ میلیارد ریال per existing pharmacy), «برخورداری» displayed as a
+percentile so it sits next to the other four dimensions without pretending to be
+an income measurement.
+
+### In the main dashboard list
+
+The dashboard reads `v_place_full`, i.e. the FDA feed. The administrative layer
+feeds it in two controlled ways, and neither invents a pharmacy number:
+
+* `etl/link_admin_places.py` copies every Khuzestan city and every village of
+  3,000+ people that the feed never listed into `locations` (+ one snapshot with
+  `population` only). They carry `dq_flags = no_fda_data`, are shown with `—`
+  instead of a pharmacy count, are badged «دادهٔ FDA ندارد», and are **never
+  ranked** (`analytics.ts` keeps them out of the percentile baseline). The row
+  stays because a place you can name must not be invisible.
+* The list itself now keeps **every city** regardless of the population floor,
+  and Khuzestan villages of 3,000+ people even when the feed reports no pharmacy
+  for them. A settlement with no pharmacy *and* no applicant is listed but not
+  scored — that pattern is as often an attribution gap as a real white space.
+
+```bash
+python etl/link_admin_places.py --min-village 3000   # idempotent
+```
+
+### Known limits of the layer
+
+* **No income per settlement exists in any loaded source.** The index is
+  structure — urbanisation, household size, agglomeration — not money. A rich
+  village next to a poor one with the same shape will rank alike.
+* `hh_size` is `NULL` for every row until `etl/enrich_population.py` has been
+  run (the reference layer is derived and a rebuild clears it). `NULL` is treated
+  as *no information* (factor 1), never as an average.
+* **Not modelled, on purpose:** distance to a metropolis, foot traffic,
+  competitor positioning, insurer mix, the cosmetics market's brand structure.
+  They are listed in the panel as omissions rather than folded in as fake
+  precision.
+* The yearbook anchor is **Khuzestan's**. Outside the province the ratio is still
+  applied, and the UI says so; the level applies nationally because the model is
+  relative.
+
+Two guards keep it honest:
+
+```bash
+python etl/verify_otc.py     # the inputs: one row per place, bounded shares, sane anchor
+python etl/sanity_model.py   # the model: normalised mean, bounded range, entrant ≤ market
+```
 
 ---
 
@@ -262,6 +378,7 @@ web/
   src/lib/db.ts       node:sqlite access
   src/lib/data.ts     server-side payload assembly (is_market scope)
   src/lib/analytics.ts scoring model, percentile ranking, exclusion rules
+  src/lib/otc.ts      buying-power index + the out-of-pocket (بدون نسخه) model
   src/lib/format.ts   Persian digits/separators — the single place that decides them
   src/lib/jalali.ts   Gregorian → Shamsi date
   src/components/     Dashboard, Controls, PlacesTable, Charts, DetailPanel, …
@@ -526,6 +643,91 @@ python etl/verify_geo_page.py    # drives the atlas in headless Chromium and mea
   variants and a substring test, and the raw values are always kept.
 * Distances are measured from a single point (31.3203, 48.6693) — the centre of
   اهواز — not from the user's actual plot.
+
+---
+
+## Administrative layer (خوزستان) — every settlement, not just the ones with a pharmacy
+
+The FDA feed lists a settlement only once a pharmacy (or an application) exists
+there, and it names a بخش but never a دهستان. So «how many people live in
+ام‌الطمیر?» had no answer anywhere in `locations`. The administrative layer
+answers it for the whole province and is the **inventory of places**, independent
+of the pharmacy feed:
+
+| Level | Rows | With population |
+|---|---:|---:|
+| شهرستان | 31 | 22 |
+| بخش | 94 | 54 |
+| دهستان | 258 | 112 |
+| شهر | 100 | 99 |
+| روستا / آبادی | 5,405 | 4,240 |
+
+`ام‌الطمیر` (5,004) is in the tree, as are the smaller villages around it.
+
+### Where each level comes from
+
+* **شهرستان / بخش / دهستان / شهر + their 1395 populations** — the
+  «تقسیمات کشوری» table on each fa.wikipedia county article. That table is the
+  only public source that states a دهستان together with its population, and it
+  exists even for counties whose own article is a stub (24 of 31 counties have
+  it; the rest fall back to Wikidata).
+* **روستا** — the {{جعبه اطلاعات روستای ایران}} infobox on 3,363 village
+  articles (استان/شهرستان/بخش/دهستان/جمعیت/کد آماری), then Wikidata for the
+  villages Wikipedia has no article for, then the FDA feed and OSM for the rest.
+  A village that only one source knows still gets a row — that is the point.
+* **Coordinates, QID, article** — Wikidata (`P131*` from Q241119, `P1082`,
+  `P625`). Wikidata's «شهر» class is *not* trusted to promote a place to city:
+  شهر status comes from the list article and the county tables only.
+
+### Nothing is overwritten, and everything is dated
+
+```
+admin_import        one row per ingest (label, observed_at, sha256s, counts)
+admin_area          stable identity: kind, name, parent, current denormalised path
+admin_area_version  the state of that area during [valid_from, valid_to)
+admin_population    one row per (area, source, census year) during [valid_from, valid_to)
+admin_area_alias    every spelling seen, with the source that used it
+admin_area_link     which FDA location / OSM place this area is (many-to-one)
+```
+
+A re-ingest never edits a row: it closes the open version at `valid_to` and
+opens a new one. Asking *«what did the tree look like yesterday?»* is a
+`WHERE valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)`, not a restore.
+Areas that vanish from a snapshot are closed, never deleted.
+
+### Four sources, four numbers
+
+Each source's population is stored separately, and the view picks the value most
+sources agree on (`v_admin_area_current`), so one article's typo — دزفول's county
+figure printed on the city row — cannot outvote the other three. All four values
+remain queryable, with census year and confidence.
+
+### Commands
+
+```bash
+python etl/fetch_admin_khz.py     # fa.wikipedia payloads -> data/raw/wiki/*.json (cached, --refresh to refetch)
+python etl/load_admin.py          # parse + load, date-banded; idempotent (2nd run: added 0, changed 0)
+python etl/report_admin.py        # reports/admin_khuzestan.{md,csv,xlsx}
+python etl/verify_admin.py        # invariants: one open version per area, parents, positive population, links
+```
+
+### Known limits
+
+* 1,165 villages still have no population: no village article and no `P1082`.
+  They are listed with `population NULL`, never guessed.
+* Populations mix census years (1385/1390/1395) because that is what each
+  article states; `population_year_sh` carries the year, and the 1395 figure is
+  preferred when both exist.
+* A handful of names arrive concatenated by the source tables («اهواز الهایی»);
+  the loader splits them, but the underlying article is still wrong.
+* New counties (کرخه، صیدون، دزپارت، ابوالعباس) exist in the tree, but villages
+  in them are thinner than in the older counties — Wikipedia's coverage, not the
+  loader's.
+* The app renders it at **`/places`** (linked from the dashboard header): the
+  whole tree, expand-all, search that folds ZWNJ/spacing («ام الطمیر» =
+  «امالطمیر»), and per-place population by source plus the pharmacy count rolled
+  up from the linked FDA rows. `tools/verify_places.py` drives it in a browser
+  and asserts the rendered row count equals the database.
 
 ---
 

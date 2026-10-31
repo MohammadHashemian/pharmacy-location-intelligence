@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ScoredPlace, UnitEconomics } from "@/lib/analytics";
-import { group, num, shortCounty, shortPlace } from "@/lib/format";
+import { group, irr, num, shortCounty, shortPlace } from "@/lib/format";
 import { Badge, Button, Empty, Meter, type Tone } from "./ui";
 
 type SortKey =
@@ -17,14 +17,18 @@ type SortKey =
   | "n_req_pipeline"
   | "pharmacies_per_100k"
   | "population_per_pharmacy"
+  | "postEntryPopPerPharmacy"
   | "min_score"
   | "capacityGap"
   | "estScriptsForEntrant"
   | "estRevenue"
+  | "prosperity"
+  | "otcForEntrant"
   | "opportunity";
 
 interface Row extends ScoredPlace {
   estRevenue: number;
+  otcForEntrant: number;
 }
 
 interface Col {
@@ -55,6 +59,13 @@ const BASE_COLUMNS: Col[] = [
   { key: "county", label: "شهرستان", hint: "شهرستان تابع", numeric: false },
   { key: "population", label: "جمعیت", hint: "جمعیت ثبت‌شده", numeric: true },
   {
+    key: "prosperity",
+    label: "برخورداری",
+    hint:
+      "رتبهٔ صدکی قدرت خرید منطقه در مجموعهٔ مقایسه (۱۰۰ = برخوردارترین). از شهر/روستا بودن، شهرنشینی شهرستان، بعد خانوار و اندازهٔ آبادی ساخته می‌شود — اندازه‌گیری درآمد نیست.",
+    numeric: true,
+  },
+  {
     key: "n_pharmacy_total",
     label: "داروخانه",
     hint: "داروخانهٔ فعال: حقیقی + حقوقی",
@@ -80,6 +91,13 @@ const BASE_COLUMNS: Col[] = [
     numeric: true,
   },
   {
+    key: "postEntryPopPerPharmacy",
+    label: "نفر/داروخانه با شما",
+    hint:
+      "جمعیت ÷ (داروخانهٔ موجود + موافقت‌اصولی + ۱ شما): نسبت جمعیت به داروخانه اگر خودتان هم تاسیس کنید، با احتساب داروخانه‌هایی که مجوز اصولی دارند و قطعاً باز می‌شوند. هرچه بالاتر، شهر داروخانهٔ تازه را بهتر تحمل می‌کند — شهر ۱‌داروخانه‌ای ۵٬۰۰۰ نفری اینجا ۲٬۵۰۰ می‌شود. ستون «تحمل» در امتیاز فرصت همین است.",
+    numeric: true,
+  },
+  {
     key: "n_req_pipeline",
     label: "صف متقاضیان",
     hint: "ثبت‌شده + درحال‌جریان + موافقت‌اصولی",
@@ -94,13 +112,14 @@ const BASE_COLUMNS: Col[] = [
   {
     key: "capacityGap",
     label: "ظرفیت جذب",
-    hint: "جمعیت ÷ هدف − داروخانه فعلی",
+    hint: "جمعیت ÷ هدف − (موجود + موافقت‌اصولی)",
     numeric: true,
   },
   {
     key: "estScriptsForEntrant",
     label: "نسخهٔ برآوردی",
-    hint: "نسخهٔ سالانهٔ برآوردی برای شما: جمعیت × نسخه‌سرانه ÷ (داروخانه + ۱)",
+    hint:
+      "نسخهٔ سالانهٔ برآوردی برای شما: جمعیت × نسخه‌سرانه ÷ (موجود + موافقت‌اصولی + ۱)",
     numeric: true,
     hideXl: true,
   },
@@ -112,9 +131,16 @@ const BASE_COLUMNS: Col[] = [
     hideXl: true,
   },
   {
+    key: "otcForEntrant",
+    label: "فروش بدون نسخه",
+    hint:
+      "برآورد فروش سالانهٔ بدون نسخه (آرایشی، بهداشتی، مکمل، داروهای آزاد) برای شما: بازار محلی بدون نسخه ÷ (موجود + موافقت‌اصولی + ۱)",
+    numeric: true,
+  },
+  {
     key: "opportunity",
     label: "امتیاز فرصت",
-    hint: "ترکیب وزنی چهار مؤلفه (۰–۱۰۰)",
+    hint: "ترکیب وزنی شش مؤلفه (۰–۱۰۰)",
     numeric: true,
   },
 ];
@@ -162,6 +188,7 @@ export function PlacesTable({
       rows.map((r) => ({
         ...r,
         estRevenue: r.estScriptsForEntrant * economics.netMarginPerScriptIRR,
+        otcForEntrant: r.otc.forEntrant,
       })),
     [rows, economics.netMarginPerScriptIRR],
   );
@@ -222,10 +249,15 @@ export function PlacesTable({
       "university",
       "dq_flags",
       "population",
+      "buying_power_index",
+      "prosperity_0_100",
+      "prosperity_band",
       "pharmacies_current",
       "pharmacies_with_approval",
       "pharmacies_per_100k",
       "population_per_pharmacy",
+      "post_entry_pop_per_pharmacy",
+      "entry_dilution_pct",
       "requests_registered",
       "requests_inprogress",
       "requests_approved",
@@ -235,10 +267,16 @@ export function PlacesTable({
       "absorbable_pharmacies",
       "est_scripts_for_entrant",
       "est_revenue_irr",
+      "otc_per_capita_irr",
+      "otc_market_irr",
+      "otc_per_pharmacy_irr",
+      "otc_for_entrant_irr",
       "score_demand",
       "score_headroom",
       "score_pipeline",
       "score_barrier",
+      "score_affluence",
+      "score_tolerance",
       "score_opportunity",
       "observed_at",
     ];
@@ -252,10 +290,15 @@ export function PlacesTable({
         r.university ?? "",
         r.dq_flags ?? "",
         r.population ?? "",
-        r.n_pharmacy_total,
-        r.n_pharmacy_committed,
-        r.pharmacies_per_100k ?? "",
-        r.population_per_pharmacy ?? "",
+        r.buying_power.toFixed(3),
+        r.prosperity.toFixed(1),
+        r.prosperity_band,
+        (r.dq_flags ?? "").includes("no_fda_data") ? "" : r.n_pharmacy_total,
+        (r.dq_flags ?? "").includes("no_fda_data") ? "" : r.n_pharmacy_committed,
+        (r.dq_flags ?? "").includes("no_fda_data") ? "" : (r.pharmacies_per_100k ?? ""),
+        (r.dq_flags ?? "").includes("no_fda_data") ? "" : (r.population_per_pharmacy ?? ""),
+        r.postEntryPopPerPharmacy,
+        r.entryDilutionPct,
         r.n_req_registered,
         r.n_req_inprogress,
         r.n_req_approved,
@@ -265,10 +308,16 @@ export function PlacesTable({
         r.absorbablePharmacies,
         r.estScriptsForEntrant,
         Math.round(r.estRevenue),
+        r.otc.perCapita,
+        r.otc.market,
+        r.otc.perPharmacy,
+        r.otc.forEntrant,
         r.scores.demand.toFixed(1),
         r.scores.headroom.toFixed(1),
         r.scores.pipeline.toFixed(1),
         r.scores.barrier.toFixed(1),
+        r.scores.affluence.toFixed(1),
+        r.scores.tolerance.toFixed(1),
         r.scores.opportunity.toFixed(2),
         r.observed_at,
       ]
@@ -311,7 +360,7 @@ export function PlacesTable({
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-line">
-        <table className="w-full min-w-[1240px] border-collapse text-[12.5px]">
+        <table className="w-full min-w-[1540px] border-collapse text-[12.5px]">
           <thead>
             <tr className="bg-surface-2">
               {columns.map((c) => {
@@ -349,6 +398,8 @@ export function PlacesTable({
               const warnings = r.warnings ?? [];
               const flagged = warnings.length > 0;
               const hardWarning = !r.scorable;
+              /* No FDA row at all: every pharmacy figure is UNKNOWN, not zero. */
+              const noFda = (r.dq_flags ?? "").includes("no_fda_data");
               return (
                 <tr
                   key={r.location_id}
@@ -450,13 +501,39 @@ export function PlacesTable({
                     {group(r.population)}
                   </td>
                   <td className="tnum px-2.5 py-1.5 text-left">
-                    {group(r.n_pharmacy_total)}
-                  </td>
-                  <td className="tnum hidden px-2.5 py-1.5 text-left text-muted xl:table-cell">
-                    {group(r.n_pharmacy_committed)}
+                    <span
+                      title={[
+                        `برخورداری: رتبهٔ ${num(r.prosperity, 0)} از ۱۰۰ در مجموعهٔ مقایسه — ${r.prosperity_band}`,
+                        `قدرت خرید نسبت به میانگین کشور: ${num(r.buying_power, 2)} برابر`,
+                        `شهر/روستا: ${num(r.affluence_factors.urbanity, 2)} · شهرنشینی شهرستان: ${num(r.affluence_factors.countyUrban, 2)} · بعد خانوار: ${num(r.affluence_factors.household, 2)} · اندازهٔ آبادی: ${num(r.affluence_factors.agglomeration, 2)}`,
+                      ].join("\n")}
+                      className={`cursor-help ${
+                        r.prosperity >= 75
+                          ? "font-semibold text-good"
+                          : r.prosperity < 35
+                            ? "text-danger"
+                            : ""
+                      }`}
+                    >
+                      {num(r.prosperity, 0)}
+                    </span>
                   </td>
                   <td className="tnum px-2.5 py-1.5 text-left">
-                    {r.pharmacies_per_100k == null ? (
+                    {noFda ? (
+                      <span className="text-faint" title="دادهٔ FDA ندارد">
+                        —
+                      </span>
+                    ) : (
+                      group(r.n_pharmacy_total)
+                    )}
+                  </td>
+                  <td className="tnum hidden px-2.5 py-1.5 text-left text-muted xl:table-cell">
+                    {noFda ? "—" : group(r.n_pharmacy_committed)}
+                  </td>
+                  <td className="tnum px-2.5 py-1.5 text-left">
+                    {noFda ? (
+                      <span className="text-faint">—</span>
+                    ) : r.pharmacies_per_100k == null ? (
                       <span className="text-faint">—</span>
                     ) : (
                       <span
@@ -473,7 +550,35 @@ export function PlacesTable({
                     )}
                   </td>
                   <td className="tnum px-2.5 py-1.5 text-left text-muted">
-                    {group(r.population_per_pharmacy)}
+                    {noFda ? "—" : group(r.population_per_pharmacy)}
+                  </td>
+                  <td
+                    className="tnum px-2.5 py-1.5 text-left"
+                    title={[
+                      `جمعیت ÷ (${r.n_pharmacy_total} موجود + ${r.n_req_approved} موافقت‌اصولی + ۱ شما = ${r.n_pharmacy_committed + 1}): نسبت پس از ورود شما`,
+                      r.n_pharmacy_committed > 0
+                        ? `سهم شما از سبد هر داروخانه: ${num(r.entryDilutionPct, 0)}٪`
+                        : "امروز هیچ داروخانه‌ای ندارد — تمام بازار از آنِ شما",
+                      `داروخانه در ۱۰۰ هزار نفر پس از ورود شما: ${num(r.postEntryDensity, 1)}`,
+                      `تحمل ورود (صدک، ۱۰۰=بهترین): ${num(r.scores.tolerance, 1)}`,
+                    ].join("\n")}
+                  >
+                    {r.scorable ? (
+                      <span
+                        className={
+                          r.postEntryPopPerPharmacy >= r.targetPopPerPharmacy
+                            ? "font-semibold text-good"
+                            : r.postEntryPopPerPharmacy <
+                                r.targetPopPerPharmacy * 0.6
+                              ? "text-danger"
+                              : ""
+                        }
+                      >
+                        {group(r.postEntryPopPerPharmacy)}
+                      </span>
+                    ) : (
+                      <span className="text-faint">—</span>
+                    )}
                   </td>
                   <td className="tnum px-2.5 py-1.5 text-left">
                     {r.n_req_pipeline ? (
@@ -503,6 +608,17 @@ export function PlacesTable({
                   </td>
                   <td className="tnum hidden px-2.5 py-1.5 text-left font-medium xl:table-cell">
                     {group(r.estRevenue)}
+                  </td>
+                  <td
+                    className="tnum px-2.5 py-1.5 text-left font-medium"
+                    title={[
+                      `بازار محلی بدون نسخه: ${irr(r.otc.market)} در سال`,
+                      `سرانه: ${irr(r.otc.perCapita)} برای هر نفر در سال`,
+                      `میانگین هر داروخانهٔ موجود: ${irr(r.otc.perPharmacy)}`,
+                      `سهم شما با یک داروخانهٔ تازه: ${irr(r.otc.forEntrant)}`,
+                    ].join("\n")}
+                  >
+                    {irr(r.otcForEntrant)}
                   </td>
                   <td className="sticky left-0 z-[5] bg-inherit px-2.5 py-1.5">
                     <div className="flex items-center justify-end gap-1.5">
@@ -540,10 +656,25 @@ export function PlacesTable({
       <p className="text-[11px] leading-4 text-faint">
         «داروخانه (فعلی)» = حقیقی + حقوقی. «با موافقت‌اصولی» = داروخانه فعلی +
         موافقت‌اصولی صادرشده، یعنی عرضهٔ قطعی آینده که رقیب شما خواهد بود.
-        «ظرفیت قابل جذب» = جمعیت ÷ هدفِ جمعیت‌به‌ازای‌هر‌داروخانه − داروخانه
-        فعلی؛ عدد نامنفی یعنی شهر هنوز جا دارد. «درآمد برآوردی» بر پایهٔ فرض‌های
-        اقتصادی شما محاسبه می‌شود و فقط برای مقایسهٔ نسبی است، نه پیش‌بینی.
-        ستون‌های عددی را می‌توانید با کلیک روی عنوان مرتب کنید.
+        «ظرفیت قابل جذب» = جمعیت ÷ هدفِ جمعیت‌به‌ازای‌هر‌داروخانه − (داروخانه
+        موجود + موافقت‌اصولی)؛ عدد نامنفی یعنی شهر پس از ورود داروخانه‌های در راه
+        هنوز جا دارد. «درآمد برآوردی» بر پایهٔ فرض‌های اقتصادی شما محاسبه می‌شود و
+        فقط برای مقایسهٔ نسبی است، نه پیش‌بینی.
+        <br />
+        <b className="text-muted">«نفر/داروخانه با شما»</b> نسبت جمعیت به
+        داروخانه است اگر خودتان هم در آن آبادی تاسیس کنید: جمعیت ÷ (موجود +
+        موافقت‌اصولی + ۱). داروخانه‌ای که موافقت‌اصولی گرفته قطعاً باز می‌شود، پس
+        رقیب قطعی است نه احتمالی. ستون «نفر/داروخانه» وضعیت امروز را نشان می‌دهد
+        و این ستون وضعیتی را که در آن کار می‌کنید — شهری با ۵٬۰۰۰ نفر و ۱
+        داروخانه امروز ایده‌آل به‌نظر می‌رسد ولی با ورود شما ۲٬۵۰۰ می‌شود، در
+        حالی که شهر ۲۰٬۰۰۰ نفری با ۴ داروخانه فقط به ۴٬۰۰۰ می‌رسد.
+        <br />
+        <b className="text-muted">«برخورداری»</b> قدرت خرید نسبی همان آبادی است
+        (۰ تا ۱۰۰؛ ۵۰ = میانگین وزنی کشور) و <b className="text-muted">
+        «فروش بدون نسخه»</b> برآورد فروش سالانهٔ آرایشی، بهداشتی، مکمل و داروهای
+        آزاد برای داروخانهٔ تازهٔ شماست — بخشی از درآمد که بیمه پرداختش نمی‌کند و
+        مستقیماً به توان مالی مردم محل بستگی دارد. ستون‌های عددی را می‌توانید با
+        کلیک روی عنوان مرتب کنید.
       </p>
     </div>
   );

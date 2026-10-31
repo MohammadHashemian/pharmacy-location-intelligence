@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS admin_import (
   n_added       INTEGER NOT NULL DEFAULT 0,
   n_changed     INTEGER NOT NULL DEFAULT 0,
   notes         TEXT,
-  UNIQUE (label, observed_at)
+  UNIQUE (label, imported_at)
 );
 
 -- ---------------------------------------------------------------------------
@@ -180,10 +180,16 @@ SELECT a.id            AS area_id,
        p.confidence    AS population_confidence
 FROM admin_area a
 JOIN admin_area_version v ON v.area_id = a.id AND v.valid_to IS NULL
+-- Which number wins when the four sources disagree: the one that the most
+-- sources agree on, then the most confident one. A single article's typo
+-- (دزفول's county figure on the city row) cannot outvote the other three.
 LEFT JOIN admin_population p ON p.id = (
     SELECT p2.id FROM admin_population p2
     WHERE p2.area_id = a.id AND p2.valid_to IS NULL AND p2.population IS NOT NULL
-    ORDER BY COALESCE(p2.confidence, 0) DESC, p2.year_sh DESC, p2.id DESC
+    ORDER BY (SELECT COUNT(*) FROM admin_population p3
+               WHERE p3.area_id = a.id AND p3.valid_to IS NULL
+                 AND p3.population = p2.population) DESC,
+             COALESCE(p2.confidence, 0) DESC, p2.year_sh DESC, p2.id DESC
     LIMIT 1
 );
 

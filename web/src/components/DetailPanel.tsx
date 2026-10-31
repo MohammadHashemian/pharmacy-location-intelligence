@@ -44,6 +44,14 @@ const DIMENSIONS: {
     weightLabel: (w) => `${w.headroom}`,
   },
   {
+    key: "tolerance",
+    label: "تحمل داروخانهٔ جدید",
+    explain:
+      "رتبهٔ صدکی جمعیت به‌ازای هر داروخانه پس از اضافه‌شدن داروخانهٔ شما — و «موافقت‌اصولی»ها: جمعیت ÷ (موجود + موافقت‌اصولی + ۱). شهری با ۱ داروخانه و ۵٬۰۰۰ نفر امروز عالی است ولی با ورود شما به ۲٬۵۰۰ می‌رسد؛ همین مؤلفه آن افت را جریمه می‌کند.",
+    color: "#8b5cf6",
+    weightLabel: (w) => `${w.tolerance}`,
+  },
+  {
     key: "pipeline",
     label: "کم‌بودن صف متقاضی",
     explain: "۱۰۰ منهای رتبهٔ صدکی نسبت متقاضیان به داروخانه‌های موجود.",
@@ -57,6 +65,14 @@ const DIMENSIONS: {
       "۱۰۰ منهای رتبهٔ صدکی «حداقل امتیاز»؛ امتیاز پایین‌تر یعنی مجوز آسان‌تر.",
     color: "#e11d48",
     weightLabel: (w) => `${w.barrier}`,
+  },
+  {
+    key: "affluence",
+    label: "قدرت خرید محل",
+    explain:
+      "رتبهٔ صدکی برخورداری درون مجموعهٔ مقایسه. هرچه بالاتر، مردم محل بیشتر پول خرج می‌کنند — و سهم فروش بدون نسخه (آرایشی، بهداشتی، مکمل) بیشتر می‌شود.",
+    color: "#0284c7",
+    weightLabel: (w) => `${w.affluence}`,
   },
 ];
 
@@ -112,7 +128,13 @@ export function DetailPanel({
   if (!place) return null;
 
   const w = tunables.weights;
-  const wSum = w.demand + w.headroom + w.pipeline + w.barrier || 1;
+  const wSum =
+    w.demand +
+      w.headroom +
+      w.pipeline +
+      w.barrier +
+      w.affluence +
+      w.tolerance || 1;
   const opp = place.scores.opportunity;
   const tone: Tone =
     opp >= 75 ? "good" : opp >= 55 ? "brand" : opp >= 35 ? "muted" : "warn";
@@ -428,6 +450,29 @@ export function DetailPanel({
             />
             <div className="rounded-xl border border-line bg-surface-2 px-3 py-1">
               <RawRow
+                label="جمعیت به‌ازای هر داروخانه (امروز)"
+                value={
+                  place.population_per_pharmacy == null
+                    ? "—"
+                    : group(place.population_per_pharmacy)
+                }
+                hint="جمعیت ÷ داروخانهٔ فعلی"
+              />
+              <RawRow
+                label="جمعیت به‌ازای هر داروخانه (پس از ورود شما)"
+                value={group(place.postEntryPopPerPharmacy)}
+                hint={`جمعیت ÷ (${place.n_pharmacy_total} موجود + ${place.n_req_approved} موافقت‌اصولی + ۱ شما = ${place.n_pharmacy_committed + 1}) — داروخانه‌هایی که با مجوز اصولی در راه‌اند هم رقیب قطعی‌اند`}
+              />
+              <RawRow
+                label="سهمی که از هر داروخانه جدا می‌شود"
+                value={
+                  place.n_pharmacy_committed > 0
+                    ? `${num(place.entryDilutionPct, 0)}٪`
+                    : "تمام بازار (بدون رقیب)"
+                }
+                hint="۱ ÷ (موجود + موافقت‌اصولی + ۱): سهمی از سبد هر داروخانه که به داروخانهٔ شما می‌رسد. با یک داروخانه نصف، با چهار داروخانه یک‌پنجم — یعنی بازار بزرگ‌تر افت کمتری می‌بیند."
+              />
+              <RawRow
                 label="ظرفیت قابل جذب (تعداد داروخانه)"
                 value={
                   place.absorbablePharmacies > 0 ? (
@@ -440,18 +485,108 @@ export function DetailPanel({
                     </span>
                   )
                 }
-                hint="جمعیت ÷ هدف − داروخانهٔ فعلی"
+                hint="جمعیت ÷ هدف − (موجود + موافقت‌اصولی): جاهایی که پس از ورود داروخانه‌های در راه باقی می‌مانَد"
               />
               <RawRow
                 label="نسخهٔ برآوردی سهم شما (سالانه)"
                 value={group(place.estScriptsForEntrant)}
-                hint={`جمعیت × ${economics.scriptsPerCapitaPerYear} نسخه ÷ (${place.n_pharmacy_total} + ۱)`}
+                hint={`جمعیت × ${economics.scriptsPerCapitaPerYear} نسخه ÷ (${place.n_pharmacy_committed} + ۱)`}
               />
               <RawRow
                 label="درآمد برآوردی سالانه"
                 value={irr(estRevenue)}
                 hint={`بر پایه حاشیهٔ سود ${group(economics.netMarginPerScriptIRR)} ریال به‌ازای هر نسخه`}
               />
+            </div>
+          </section>
+
+          {/* ------------------------------------------------------ otc --- */}
+          {/* The out-of-pocket half of the business. This is the part the FDA
+              feed cannot answer, and the reason buying power is both a ranking
+              dimension and a money figure. */}
+          <section>
+            <SectionTitle
+              title="فروش بدون نسخه (برآورد)"
+              hint="آرایشی، بهداشتی، مکمل و داروهای آزاد — بخشی از بازار که بیمه پرداخت نمی‌کند و مستقیماً به توان مالی مردم محل بستگی دارد."
+            />
+            <div className="rounded-xl border border-line bg-surface-2 px-3 py-1">
+              <RawRow
+                label="برخورداری محل"
+                value={`رتبهٔ ${num(place.prosperity, 0)} از ۱۰۰ — ${place.prosperity_band}`}
+                hint="رتبهٔ صدکی قدرت خرید در مجموعهٔ مقایسه: ۱۰۰ = برخوردارترین. اندازه‌گیری درآمد نیست؛ از چهار عامل زیر ساخته می‌شود."
+              />
+              <RawRow
+                label="قدرت خرید نسبت به میانگین کشور"
+                value={`${num(place.buying_power, 2)} برابر`}
+                hint="۱ برابر = میانگین کشوری؛ ۱٫۳ یعنی حدود ۳۰٪ بالاتر از میانگین"
+              />
+              <RawRow
+                label="فروش بدون نسخه به‌ازای هر نفر (سالانه)"
+                value={irr(place.otc.perCapita)}
+                hint={`پایهٔ سرانه × قدرت خرید به توان ${num(economics.otcElasticity, 2)}`}
+              />
+              <RawRow
+                label="بازار بدون نسخهٔ همین آبادی (سالانه)"
+                value={irr(place.otc.market)}
+                hint="جمعیت × سرانهٔ محلی"
+              />
+              <RawRow
+                label="میانگین هر داروخانهٔ موجود"
+                value={irr(place.otc.perPharmacy)}
+                hint="بازار آبادی ÷ تعداد داروخانهٔ فعلی (بدون ورودی جدید)"
+              />
+              <RawRow
+                label="سهم برآوردی شما (داروخانهٔ تازه)"
+                value={irr(place.otc.forEntrant)}
+                hint={`بازار ÷ (${place.n_pharmacy_committed} + ۱) — ورود شما تقاضا نمی‌سازد، بازار را تقسیم می‌کند؛ موافقت‌اصولی‌های در راه هم سهم دارند`}
+              />
+            </div>
+
+            <div className="mt-2 rounded-xl border border-line bg-surface px-3 py-2">
+              <div className="text-[11px] font-semibold text-ink-soft">
+                اجزای شاخص برخورداری
+              </div>
+              <ul className="ms-4 mt-1 list-disc space-y-0.5 text-[11px] leading-5 text-ink-soft">
+                <li>
+                  شهر/روستا: <b className="tnum">
+                    {num(place.affluence_factors.urbanity, 2)}
+                  </b>{" "}
+                  — بر پایهٔ نسبت اندازه‌گیری‌شدهٔ هزینهٔ خانوار روستایی به شهری
+                  در سالنامهٔ استان (نه یک حدس).
+                </li>
+                <li>
+                  شهرنشینی شهرستان:{" "}
+                  <b className="tnum">
+                    {num(place.affluence_factors.countyUrban, 2)}
+                  </b>{" "}
+                  — سهم جمعیت شهرستان که در شهر یا آبادی بزرگ زندگی می‌کند.
+                </li>
+                <li>
+                  بعد خانوار:{" "}
+                  <b className="tnum">
+                    {num(place.affluence_factors.household, 2)}
+                  </b>{" "}
+                  {place.hh_size == null
+                    ? "— بدون داده (خنثی)؛ با بارگذاری لایهٔ جمعیت مرجع فعال می‌شود."
+                    : `— ${num(place.hh_size, 1)} نفر در خانوار؛ خانوار کوچک‌تر معمولاً برخوردارتر است.`}
+                </li>
+                <li>
+                  اندازهٔ آبادی:{" "}
+                  <b className="tnum">
+                    {num(place.affluence_factors.agglomeration, 2)}
+                  </b>{" "}
+                  — آبادی بزرگ‌تر، کسب‌وکار و خدمات بیشتری دارد.
+                </li>
+              </ul>
+              <p className="mt-1.5 text-[10.5px] leading-4 text-faint">
+                این چهار عدد در هم ضرب می‌شوند و بر میانگین وزنی کشور تقسیم
+                می‌شوند. سطح پولی از یک لنگر رسمی می‌آید: هزینهٔ سالانهٔ خانوار در
+                سالنامهٔ آماری استان ۱۴۰۳، با فرض{" "}
+                <span className="tnum">{irr(economics.otcPerCapitaIRR)}</span>{" "}
+                فروش سرانه در سال برای نقطهٔ میانگین. فاصله تا کلان‌شهر، رفت‌وآمد
+                و ترکیب بیمه‌ای مدل نشده‌اند — این‌ها سهوگیریِ آگاهانه‌اند، نه
+                دقتِ ساختگی.
+              </p>
             </div>
           </section>
 

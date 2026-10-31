@@ -19,6 +19,7 @@ rendered at a Persian-capable size and Persian digits are used throughout.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import sys
@@ -39,6 +40,66 @@ def s(v) -> str:
     return "" if v is None else str(v)
 
 
+def network_distance(nodes: list[dict]) -> tuple[list, dict]:
+    """Shortest path from اهواز over a settlement-adjacency graph, in km.
+
+    The exported `edges` are a minimum spanning tree, which is the right thing to
+    *draw* and the wrong thing to measure on: a tree path zigzags and can be
+    twice the road distance. So the metric is computed on a proximity graph —
+    every settlement joined to its 5 nearest neighbours and to everything within
+    10 km — and then benchmarked against the 510 places where OSRM's real road
+    distance exists.
+
+    Returns (list aligned with `nodes`, null where unreachable), meta.
+    """
+    import heapq
+
+    import numpy as np
+
+    n = len(nodes)
+    lat = np.array([x["lat"] for x in nodes], dtype=float)
+    lon = np.array([x["lon"] for x in nodes], dtype=float)
+    k = math.cos(math.radians(31.4))
+    pts = np.c_[lon * 111.32 * k, lat * 110.57]          # local km plane
+    d = np.hypot(pts[:, None, 0] - pts[None, :, 0], pts[:, None, 1] - pts[None, :, 1])
+    np.fill_diagonal(d, np.inf)
+    adj: list[list[tuple[int, float]]] = [[] for _ in range(n)]
+    for i in range(n):
+        for j in np.argpartition(d[i], 5)[:5]:
+            adj[i].append((int(j), float(d[i, j])))
+            adj[int(j)].append((i, float(d[i, j])))
+        for j in np.where(d[i] <= 10.0)[0]:
+            adj[i].append((int(j), float(d[i, j])))
+            adj[int(j)].append((i, float(d[i, j])))
+
+    ref = next((i for i, x in enumerate(nodes) if x["name"] == "اهواز"), 0)
+    dist = np.full(n, np.inf)
+    dist[ref] = 0.0
+    pq = [(0.0, ref)]
+    while pq:
+        du, u = heapq.heappop(pq)
+        if du > dist[u]:
+            continue
+        for v, w in adj[u]:
+            if du + w < dist[v]:
+                dist[v] = du + w
+                heapq.heappush(pq, (dist[v], v))
+
+    straight = np.array([x.get("distance_km") or 0.0 for x in nodes])
+    road = np.array([x.get("road_km") or np.nan for x in nodes], dtype=float)
+    ok = np.isfinite(dist) & (straight > 5)
+    ratio = float(np.mean(dist[ok] / straight[ok])) if ok.any() else 0.0
+    okr = np.isfinite(road) & np.isfinite(dist)
+    vs_road = float(np.mean(dist[okr] / road[okr])) if okr.any() else 0.0
+    print(f"network distance: {int(np.isfinite(dist).sum()):,}/{n:,} nodes reachable, "
+          f"{ratio:.2f}x great-circle, {vs_road:.2f}x OSRM road (n={int(okr.sum())})")
+    meta = {"method": "5-nearest + 10 km proximity graph, Dijkstra from اهواز",
+            "reachable": int(np.isfinite(dist).sum()),
+            "vs_great_circle": round(ratio, 3), "vs_road": round(vs_road, 3),
+            "road_sample": int(okr.sum())}
+    return [None if not np.isfinite(v) else round(float(v), 1) for v in dist], meta
+
+
 def load_data() -> dict:
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
@@ -47,6 +108,7 @@ def load_data() -> dict:
     bakhsh = json.load(open(os.path.join(GEO_DIR, "khuzestan_bakhsh.geojson"),
                             encoding="utf-8"))
     net = json.load(open(NET_PATH, encoding="utf-8"))
+    net["net_km"], net["net_meta"] = network_distance(net["nodes"])
     if not os.path.exists(DENSITY_PATH):
         raise SystemExit("missing data/derived/geo_density.json — "
                          "run: python etl/build_geo_density.py")
@@ -250,9 +312,9 @@ TEMPLATE = r"""<!DOCTYPE html>
   <section class="panel" id="panel-grow">
     <div class="row">
       <label>حداکثر فاصلهٔ شبکه از اهواز:
-        <input type="range" id="g-dist" min="15" max="320" step="5" value="60" style="width:170px">
-        <b id="g-distv">۶۰</b> کیلومتر</label>
-      <label>حداقل جمعیت <input type="number" id="g-pop" value="5000" step="1000" style="width:92px"></label>
+        <input type="range" id="g-dist" min="15" max="320" step="5" value="100" style="width:170px">
+        <b id="g-distv">۱۰۰</b> کیلومتر</label>
+      <label>حداقل جمعیت <input type="number" id="g-pop" value="2000" step="1000" style="width:92px"></label>
       <label><input type="checkbox" id="g-empty"> فقط جای بدون داروخانه</label>
       <label><input type="checkbox" id="g-sortgap"> ترتیب بر اساس شکاف</label>
     </div>
@@ -285,6 +347,8 @@ TEMPLATE = r"""<!DOCTYPE html>
     <div class="scroll"><table class="grid" id="newTable"></table></div>
     <div class="row" style="margin-block-start:10px"><b>صف بازبینی: نام مشابه با یک ردیف سازمان</b></div>
     <div class="scroll"><table class="grid" id="varTable"></table></div>
+    <div class="row" style="margin-block-start:10px"><b>شهرستان‌ها: جمعیت، داروخانه، تراکم و شکاف</b></div>
+    <div class="scroll"><table class="grid" id="countyTable"></table></div>
     <div class="row" style="margin-block-start:10px"><b>منابع و پوشش</b></div>
     <div class="scroll" style="max-height:none"><table class="grid" id="srcTable"></table></div>
   </section>
@@ -316,6 +380,24 @@ const esc = s => (s===null||s===undefined) ? "" : String(s).replace(/[&<>"]/g,
 
 /* ---------- header + summary cards ---------- */
 const P = D.places.features.map(f => Object.assign({}, f.properties, {lat:f.geometry.coordinates[1], lon:f.geometry.coordinates[0]}));
+
+/* ---------- network distance from اهواز ------------------------------------
+ * `net_km` is precomputed in build_geo_pages.py: Dijkstra from اهواز over a
+ * proximity graph (5 nearest neighbours + everything within 10 km), which landed
+ * at 0.85x the real OSRM road distance on the places where both exist. The tree
+ * in `net.edges` is drawn, not measured — a tree path overstates distance.
+ */
+const N = D.net;
+const NET_KM = N.net_km.map(v => v === null ? Infinity : v);
+const nodeOfPlace = new Map();
+N.nodes.forEach((n, i) => { if (n.geo_place_id !== undefined) nodeOfPlace.set(n.geo_place_id, i); });
+/* A place outside the graph (urban neighbourhoods, the two flagged outliers) has
+   no network distance; the caller shows "—" rather than a fabricated number. */
+const netKmOf = p => {
+  const i = nodeOfPlace.get(p.geo_place_id);
+  if (i === undefined || !isFinite(NET_KM[i])) return null;
+  return NET_KM[i];
+};
 const totals = {};
 P.forEach(p => { const t = totals[p.status] = totals[p.status] || {n:0, urban:0, pop:0, nb:0};
   t.n++; if (p.place_kind==="city"||p.place_kind==="town") t.urban++;
@@ -336,7 +418,8 @@ document.getElementById("subline").textContent =
   + `جمعیت: Wikidata و سرشماری ویکی‌پدیای فارسی · شهرستان‌ها: زنجیرهٔ P131 · مرجع فاصله: شهر اهواز`;
 
 /* ---------- map ---------- */
-const map = L.map("map", {zoomControl:true, preferCanvas:true}).setView(AHVAZ, 8);
+const map = L.map("map", {zoomControl:true, preferCanvas:true}).setView(AHVAZ, 9);
+window.__map = map;               // exposed for the headless verifier
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
   {maxZoom:18, attribution:"© OpenStreetMap"}).addTo(map);
 const sat = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -352,6 +435,53 @@ const ringLayer = L.layerGroup();
 ringLayer.addTo(map);
 const ahvaz = L.circleMarker(AHVAZ, {radius:9, color:"#fff", weight:2, fillColor:"#ffd166",
   fillOpacity:1}).addTo(map).bindPopup("<div class='pop'><b>اهواز — مرجع فاصله</b><br>کلیهٔ فاصله‌ها از این نقطه اندازه‌گیری شده است.</div>");
+
+/* ---------- pharmacy-density overlay, residential cells only ---------------
+ * One rectangle per grid cell that has a settlement within DEN.meta.mask_km, so
+ * the desert, the marshes and the ridges stay empty by construction. Colour is
+ * a quantile ramp because half the cells hold zero pharmacies — a linear ramp
+ * would paint the whole province the same shade.
+ */
+const DEN = D.density;
+const densCells = DEN.cells;
+const densLayer = L.layerGroup();
+const DQ = (() => {
+  const v = densCells.map(c => c.dens).slice().sort((a, b) => a - b);
+  const q = f => v[Math.min(v.length - 1, Math.round(f * (v.length - 1)))];
+  return [q(.3), q(.5), q(.7), q(.85), q(.95)];
+})();
+const DENS_CLASS = [
+  {c:"#c62828", t:"بدون داروخانه در ۱۰ کیلومتر"},
+  {c:"#ef6c00", t:"بسیار کم"},
+  {c:"#f9a825", t:"کم"},
+  {c:"#9ccc65", t:"متوسط"},
+  {c:"#43a047", t:"زیاد"},
+  {c:"#1b5e20", t:"بسیار زیاد"},
+];
+const densClass = v => { let i = 0; while (i < DQ.length && v >= DQ[i]) i++; return i; };
+function drawDensity(){
+  densLayer.clearLayers();
+  const dLat = DEN.meta.step_lat / 2, dLon = DEN.meta.step_lon / 2;
+  densCells.forEach(c => {
+    const r = L.rectangle([[c.lat - dLat, c.lon - dLon], [c.lat + dLat, c.lon + dLon]],
+      {stroke:false, fillColor:DENS_CLASS[densClass(c.dens)].c, fillOpacity:.5});
+    r.bindTooltip(`<b>${esc(c.name)}</b>${c.county ? " — " + esc(c.county) : ""}<br>`
+      + `${c.dehestan ? "دهستان " + esc(c.dehestan) + " · " : ""}نزدیک ${esc(c.city || "—")}<br>`
+      + `جمعیت ۱۰ کیلومتر: ${faInt(c.pop)}<br>`
+      + `داروخانه در ۱۰ کیلومتر: ${faInt(c.ph)} (${faNum(c.dens, 2)} در ۱۰٬۰۰۰)<br>`
+      + `شکاف نسبت به میانهٔ استان: ${faNum(c.gap, 1)} داروخانه`, {sticky:true});
+    r.addTo(densLayer);
+  });
+}
+drawDensity();
+densLayer.addTo(map);
+document.getElementById("f-dens").addEventListener("change", e =>
+  e.target.checked ? densLayer.addTo(map) : map.removeLayer(densLayer));
+document.getElementById("densLegend").innerHTML =
+  `<span>تراکم داروخانه — ${faInt(densCells.length)} یاختهٔ مسکونی، `
+  + `شعاع ${faInt(DEN.meta.radius_km)} کیلومتر (میانهٔ استان: `
+  + `${faInt(DEN.meta.residents_per_pharmacy)} نفر برای هر داروخانه):</span>`
+  + DENS_CLASS.map(k => `<span><i style="background:${k.c};border-radius:2px"></i>${k.t}</span>`).join("");
 const popMax = Math.max(1, ...P.map(p => p.population_best||0));
 const mkRad = v => 2.6 + 9.5 * Math.sqrt(Math.max(v||0, 0)/popMax);
 const markers = L.layerGroup().addTo(map);
@@ -361,12 +491,14 @@ function popupHtml(p){
     ["نوع", KIND_FA[p.place_kind] || p.place_kind],
     ["شهرستان", p.county],
     ["بخش", p.district],
+    ["دهستان", p.dehestan ? p.dehestan + (p.dehestan_method === "nearest" ? " (نزدیک‌ترین)" : "") : "—"],
     ["جمعیت", p.population_best ? faInt(p.population_best) : "ثبت‌نشده"],
     ["منبع جمعیت", p.pop_ref_source === "wikidata" ? "ویکی‌داده (P1082)"
         : p.pop_ref_source === "wikipedia-census" ? "سرشماری — ویکی‌پدیای فارسی"
         : p.pop_ref_source === "osm-tag" ? "برچسب نقشه" : "—"],
     ["سال سرشماری", p.pop_ref_year_sh ? faInt(p.pop_ref_year_sh) : "—"],
     ["فاصلهٔ هوایی از اهواز", p.distance_km !== null ? faNum(p.distance_km,1)+" کیلومتر" : "—"],
+    ["فاصلهٔ شبکه از اهواز", netKmOf(p) !== null ? faNum(netKmOf(p),1)+" کیلومتر" : "خارج از شبکه"],
     ["فاصلهٔ جاده‌ای", p.road_km ? faNum(p.road_km,1)+" کیلومتر"+(p.road_minutes? " ("+faInt(p.road_minutes)+" دقیقه)":"") : "محاسبه نشده"],
     ["وضعیت", STATUS_FA[p.status] || p.status]
   ];
@@ -421,7 +553,10 @@ document.getElementById("mapnote").innerHTML =
  `شهرستان‌های نقشه از زنجیرهٔ P131 ویکی‌داده می‌آیند، چون نگاشت خوزستان در OpenStreetMap سطح شهرستان ندارد`
  + ` (۶۷ رابطه در سطح <span class="muted">admin_level=6</span>، همه با نام «بخش …»).`
  + ` «تازه‌یافته» یعنی نام و شهرستان آن در فهرست سازمان غذا و دارو پیدا نشد؛`
- + ` مکان‌های مبهم (نام یکسان با شهرستان متفاوت، یا نام با یک حرف اختلاف) در گروه «نیازمند بازبینی» نگه داشته شده‌اند تا به‌اشتباه تازه‌یافته شمرده نشوند.`;
+ + ` مکان‌های مبهم (نام یکسان با شهرستان متفاوت، یا نام با یک حرف اختلاف) در گروه «نیازمند بازبینی» نگه داشته شده‌اند تا به‌اشتباه تازه‌یافته شمرده نشوند.`
+ + ` <b>لایهٔ تراکم</b> فقط یاخته‌هایی را می‌کشد که یک سکونتگاه در ${faNum(DEN.meta.mask_km,1)} کیلومتری آن‌ها باشد،`
+ + ` پس بیابان، هور و ارتفاعات خالی می‌مانند؛ مقدار هر یاخته، جمعیت و داروخانهٔ ثبت‌شده در شعاع ${faInt(DEN.meta.radius_km)} کیلومتر است.`
+ + ` نام دهستان‌ها از ۱۸۸ رابطهٔ <span class="muted">admin_level=7</span> همان برداشت OpenStreetMap می‌آید.`;
 
 /* ---------- tabs ---------- */
 document.querySelectorAll(".tab[data-tab]").forEach(b => b.addEventListener("click", () => {
@@ -430,11 +565,11 @@ document.querySelectorAll(".tab[data-tab]").forEach(b => b.addEventListener("cli
   document.querySelectorAll(".panel").forEach(p => p.classList.remove("on"));
   document.getElementById("panel-" + b.dataset.tab).classList.add("on");
   if (b.dataset.tab !== "map") { drawNet(); }
+  if (b.dataset.tab === "grow") { drawGrow(); }
   map.invalidateSize();
 }));
 
 /* ---------- network graph (measured, CSS pixels) ---------- */
-const N = D.net;
 const COSLAT = Math.cos(31.5 * Math.PI / 180);   // lon degrees are ~0.85 of lat ones here
 function projX(lon, minLon, maxLon, W){ return (lon - minLon)*COSLAT/((maxLon-minLon)*COSLAT) * W; }
 function projY(lat, minLat, maxLat, H){ return H - (lat - minLat)/(maxLat-minLat) * H; }
@@ -503,6 +638,7 @@ function drawGraph(W,H){
     tip.style.left = (ev.offsetX + 12) + "px"; tip.style.top = (ev.offsetY + 8) + "px";
     tip.innerHTML = `<b>${esc(n.name)}</b><br>${KIND_FA[n.place_kind]||""} — ${STATUS_FA[n.status]||""}<br>`
       + `جمعیت ${faInt(n.pop)}<br>فاصله از اهواز ${faNum(n.distance_km,1)} کیلومتر<br>`
+      + `فاصلهٔ شبکه ${isFinite(NET_KM[+t.dataset.i]) ? faNum(NET_KM[+t.dataset.i],1)+" کیلومتر" : "—"}<br>`
       + `سکونتگاه در ۳۰ کیلومتر: ${faInt(n.settlements_30km)}<br>جمعیت ۳۰ کیلومتر: ${faInt(n.population_30km)}`;
   };
   svg.onmouseleave = () => tip.style.display = "none";
@@ -561,7 +697,10 @@ new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(drawNet, 160); })
 function table(el, cols, rows){
   document.getElementById(el).innerHTML =
     "<thead><tr>" + cols.map(c=>`<th>${c[0]}</th>`).join("") + "</tr></thead><tbody>"
-    + rows.map(r => "<tr>" + cols.map(c=>`<td>${c[1](r)}</td>`).join("") + "</tr>").join("")
+    + (rows.length
+        ? rows.map(r => "<tr>" + cols.map(c=>`<td>${c[1](r)}</td>`).join("") + "</tr>").join("")
+        : `<tr><td colspan="${cols.length}" class="muted">ردیفی در این دسته نیست — `
+          + `دادهٔ فعلی خالی است، نه اینکه جدول خراب باشد.</td></tr>`)
     + "</tbody>";
 }
 const pill = st => `<span class="pill p-${{matched:"match",new:"new",variant:"var"}[st]||"match"}">${STATUS_FA[st]||st}</span>`;
@@ -574,8 +713,10 @@ function drawDist(){
   table("distTable", [
     ["نام", r=>esc(r.name)], ["نوع", r=>KIND_FA[r.place_kind]||""],
     ["شهرستان", r=>esc(r.county)],
+    ["دهستان", r=>esc(r.dehestan||"—")],
     ["جمعیت", r=>faInt(r.population_best)], ["منبع", r=>r.pop_ref_source||"—"],
     ["هوایی (کم)", r=>faNum(r.distance_km,1)],
+    ["شبکه (کم)", r=>netKmOf(r)===null ? "—" : faNum(netKmOf(r),1)],
     ["جاده‌ای (کم)", r=>r.road_km? faNum(r.road_km,1) : "—"],
     ["زمان (دقیقه)", r=>r.road_minutes? faInt(r.road_minutes) : "—"],
     ["جهت", r=>r.direction_from_ahvaz||""],
@@ -606,12 +747,113 @@ table("varTable", [
   ["جمعیت سازمان", r=>faInt(r.fda_population)], ["داروخانه", r=>faInt(r.n_pharmacy_total)],
   ["دلیل", r=>`<span class="muted">${esc(r.match_method)}</span>`]
 ], D.variants);
+/* per-county rollup: population and pharmacies are summed from the same places
+   the map draws, so this table and the map can never disagree */
+const byCounty = {};
+P.forEach(p => {
+  if (p.place_kind === "neighbourhood") return;
+  const k = p.county || "—";
+  const o = byCounty[k] || (byCounty[k] = {county:k, n:0, pop:0, ph:0, new:0});
+  o.n++; o.pop += p.population_best || 0; o.ph += p.n_pharmacy_total || 0;
+  if (p.status === "new") o.new++;
+});
+const countyRows = Object.values(byCounty).map(o => Object.assign(o, {
+  dens: o.pop > 0 ? o.ph / o.pop * 1e4 : null,
+  gap: o.pop / DEN.meta.residents_per_pharmacy - o.ph,
+})).sort((a, b) => b.gap - a.gap);
+table("countyTable", [
+  ["شهرستان", r=>esc(r.county)],
+  ["مکان روی نقشه", r=>faInt(r.n)],
+  ["از آن تازه‌یافته", r=>faInt(r.new)],
+  ["جمعیت (لایهٔ مرجع)", r=>faInt(r.pop)],
+  ["داروخانهٔ ثبت‌شده", r=>faInt(r.ph)],
+  ["داروخانه در ۱۰٬۰۰۰ نفر", r=>r.dens === null ? "—" : faNum(r.dens,2)],
+  ["شکاف (داروخانه)", r=>`<span class="${r.gap > 0 ? "warn" : "muted"}">${faNum(r.gap,1)}</span>`],
+], countyRows);
+
 table("srcTable", [
   ["لایه", r=>r.layer], ["مأخذ", r=>`<span class="muted">${esc(r.ref)}</span>`],
   ["مجوز", r=>r.licence], ["زمان برداشت", r=>r.observed_at],
   ["تعداد عنصر", r=>faInt(r.element_count)], ["یادداشت", r=>`<span class="muted">${esc(r.notes)}</span>`]
 ], D.sources.concat(D.coverage.map(c => ({layer:"شمارنده", ref:c.metric, licence:"—",
   observed_at:"—", element_count:c.value, notes:c.detail}))));
+
+/* ---------- expansion search: walk outward from اهواز along the network ----
+ * The question is not "which place scores best" but "how far from اهواز do I
+ * have to go before a defensible site appears" — so candidates are ranked by
+ * network distance and the radius is a dial, not a filter hidden in a score.
+ */
+const PER_PHARM = DEN.meta.residents_per_pharmacy;
+function growRows(){
+  const maxD = +document.getElementById("g-dist").value;
+  const minPop = +document.getElementById("g-pop").value || 0;
+  const onlyEmpty = document.getElementById("g-empty").checked;
+  const byGap = document.getElementById("g-sortgap").checked;
+  const out = [];
+  P.forEach(p => {
+    if (p.place_kind === "neighbourhood") return;      // an urban district, not a site
+    const nk = netKmOf(p);
+    if (nk === null || nk > maxD) return;
+    const pop = p.population_best || 0;
+    if (pop < minPop) return;
+    const ph = p.n_pharmacy_total || 0;
+    if (onlyEmpty && ph > 0) return;
+    out.push({p, nk, pop, ph, gap: pop / PER_PHARM - ph});
+  });
+  out.sort(byGap ? (a, b) => b.gap - a.gap || a.nk - b.nk : (a, b) => a.nk - b.nk);
+  return out;
+}
+function drawGrow(){
+  const rows = growRows();
+  const maxD = +document.getElementById("g-dist").value;
+  document.getElementById("g-distv").textContent = faInt(maxD);
+  const pop = rows.reduce((a, r) => a + r.pop, 0);
+  const ph = rows.reduce((a, r) => a + r.ph, 0);
+  const gap = rows.reduce((a, r) => a + r.gap, 0);
+  document.getElementById("growCards").innerHTML = [
+    ["مکان در این شعاع", faInt(rows.length)],
+    ["جمعیت", faInt(pop)],
+    ["داروخانهٔ موجود", faInt(ph)],
+    ["شکاف برآوردی (داروخانه)", faNum(gap, 0)],
+    ["کاملاً بدون داروخانه", faInt(rows.filter(r => r.ph === 0).length)],
+  ].map(([l, v]) => `<div class="card"><b>${v}</b><span>${l}</span></div>`).join("");
+  document.getElementById("growTable").innerHTML =
+    "<thead><tr><th>نام</th><th>نوع</th><th>شهرستان</th><th>دهستان</th>"
+    + "<th>شبکه (کم)</th><th>جمعیت</th><th>داروخانه</th><th>شکاف</th><th></th></tr></thead><tbody>"
+    + rows.slice(0, 150).map((r, i) =>
+        `<tr><td>${esc(r.p.name)}</td><td>${KIND_FA[r.p.place_kind] || ""}</td>`
+        + `<td>${esc(r.p.county)}</td><td>${esc(r.p.dehestan || "—")}</td>`
+        + `<td>${faNum(r.nk, 1)}</td><td>${faInt(r.pop)}</td><td>${faInt(r.ph)}</td>`
+        + `<td class="${r.gap > 0 ? "warn" : "muted"}">${faNum(r.gap, 1)}</td>`
+        + `<td><button class="tab" data-grow="${i}">نقشه</button></td></tr>`).join("")
+    + "</tbody>";
+  document.getElementById("grownote").innerHTML =
+    `فاصلهٔ شبکه = کوتاه‌ترین مسیر از اهواز روی گراف همسایگی سکونتگاه‌ها `
+    + `(هر سکونتگاه به ۵ همسایهٔ نزدیک و به همهٔ سکونتگاه‌های درون ۱۰ کیلومتر؛ ${faInt(N.net_meta.reachable)} گره از `
+    + `${faInt(N.meta.node_count)}). این عدد در ${faInt(N.net_meta.road_sample)} مکانی که فاصلهٔ واقعی جاده‌ای دارند، `
+    + `${faNum(N.net_meta.vs_road, 2)} برابر مسیر OSRM در می‌آید — یعنی کمی کمتر از جادهٔ واقعی، پس آستانه‌ها را `
+    + `با احتیاط بالا ببرید. `
+    + `شکاف = جمعیت ÷ ${faInt(PER_PHARM)} منهای داروخانهٔ ثبت‌شده، پس عدد مثبت یعنی کمبود. `
+    + `جمعیت از لایهٔ مرجع (ویکی‌داده/سرشماری) و داروخانه از فهرست سازمان غذا و دارو است؛ `
+    + `مکانی که در فهرست سازمان نیست، صفر داروخانهٔ ثبت‌شده دارد — این صفر یعنی «ثبت‌نشده»، نه «بدون داروخانه».`;
+  const gRows = rows;
+  document.querySelectorAll("#growTable button[data-grow]").forEach(b =>
+    b.addEventListener("click", () => {
+      const r = gRows[+b.dataset.grow];
+      showOnMap(r.p);
+    }));
+}
+function showOnMap(p){
+  document.querySelector('.tab[data-tab="map"]').click();
+  map.invalidateSize();
+  map.setView([p.lat, p.lon], 12, {animate:false});
+  const m = markerOf.get(p);
+  if (m) m.openPopup(); else map.openPopup(popupHtml(p), [p.lat, p.lon]);
+}
+["g-dist", "g-pop", "g-empty", "g-sortgap"].forEach(id =>
+  document.getElementById(id).addEventListener("input", drawGrow));
+document.getElementById("g-dist").addEventListener("change", drawGrow);
+drawGrow();
 </script>
 </body>
 </html>

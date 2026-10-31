@@ -152,6 +152,55 @@ def main() -> int:
         page.wait_for_timeout(900)
         page.screenshot(path=os.path.join(SHOT_DIR, "atlas-6-scatter.png"))
 
+        # density overlay + دهستان + expansion search
+        page.click('.tab[data-tab="map"]')     # its checkboxes live in this panel
+        page.wait_for_timeout(500)
+        dens = page.evaluate("""() => {
+            const D = window.__GEO_DATA;
+            const cells = D.density.cells;
+            return {cells: cells.length,
+                    hasDehestan: D.places.features.filter(f => f.properties.dehestan).length,
+                    total: D.places.features.length,
+                    legend: (document.getElementById('densLegend')||{}).textContent||'',
+                    checked: document.getElementById('f-dens').checked};
+        }""")
+        print("density overlay:", {k: v for k, v in dens.items() if k != "legend"})
+        if dens["cells"] < 100:
+            failures.append(f"density overlay carries only {dens['cells']} cells")
+        if dens["hasDehestan"] != dens["total"]:
+            failures.append(f"{dens['total'] - dens['hasDehestan']} places without a دهستان")
+        if not dens["checked"]:
+            failures.append("density overlay is off by default")
+        if len(dens["legend"]) < 40:
+            failures.append("density legend did not render")
+        page.uncheck("#f-dens")
+        page.wait_for_timeout(300)
+        page.check("#f-dens")
+        page.wait_for_timeout(300)
+
+        # expansion tab: rows must exist and widening the radius must not shrink them
+        page.click('.tab[data-tab="grow"]')
+        page.wait_for_timeout(700)
+        grow = page.evaluate("""() => ({
+            rows: document.querySelectorAll('#growTable tbody tr').length,
+            cards: [...document.querySelectorAll('#growCards .card')].map(c => c.textContent),
+            scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth})""")
+        print("expansion tab:", grow)
+        if grow["rows"] < 10:
+            failures.append(f"expansion search rendered {grow['rows']} rows")
+        if grow["scrollW"] > grow["innerW"] + 1:
+            failures.append("horizontal overflow on the expansion tab")
+        page.fill("#g-dist", "200")
+        page.dispatch_event("#g-dist", "input")
+        page.wait_for_timeout(600)
+        wider = page.evaluate("""() => document.querySelectorAll('#growTable tbody tr').length""")
+        print("after widening the network radius:", wider)
+        if wider < grow["rows"]:
+            failures.append("widening the network radius shrank the candidate list")
+        page.screenshot(path=os.path.join(SHOT_DIR, "atlas-9-expansion.png"))
+        page.fill("#g-dist", "60")
+        page.dispatch_event("#g-dist", "input")
+
         page.click('.tab[data-tab="tbl"]')
         page.wait_for_timeout(700)
         tbl = page.evaluate("""() => ({

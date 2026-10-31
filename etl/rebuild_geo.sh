@@ -10,6 +10,8 @@
 #   load_geo.py             admin resolution, dedupe, FDA matching, OSRM distance
 #   enrich_geo_population.py  Wikidata P1082 + fa.wikipedia census sentences
 #   export_geo_map.py       GeoJSON for the map + the network graph JSON
+#   enrich_place_dehestan.py  دهستان (admin_level=7) onto every place
+#   build_geo_density.py    residential-masked pharmacy density surface
 #   build_geo_pages.py      the self-contained atlas HTML
 #   audit_geo.py            the checks that decide whether to trust the numbers
 set -euo pipefail
@@ -21,6 +23,8 @@ python etl/load_geo.py
 python etl/enrich_geo_population.py
 python etl/enrich_geo_road.py
 python etl/export_geo_map.py
+python etl/enrich_place_dehestan.py
+python etl/build_geo_density.py
 python etl/build_geo_pages.py
 python etl/report_geo.py
 python etl/audit_geo.py --top=30

@@ -1,4 +1,16 @@
 /** Domain types + the transparent scoring model. */
+import {
+  DEFAULT_OTC,
+  affluenceFactors,
+  affluenceScale,
+  buyingPower,
+  otcEstimate,
+  percentileOf,
+  prosperityBand,
+  PROSPERITY_LABELS,
+  type AffluenceFactors,
+  type OtcEstimate,
+} from "./otc";
 
 export type PlaceKind = "city" | "village" | "other";
 
@@ -95,6 +107,12 @@ export interface PlaceMetrics {
   is_market: number;
   /** Comma-separated ingest-time warnings: pop_outlier | pop_zero | bad_name. */
   dq_flags: string | null;
+
+  /* ---- buying power: the inputs of the OTC model (see lib/otc.ts) ---- */
+  /** Share of the county's population living in a city / large / pharmacy-bearing place. */
+  county_urban_share: number | null;
+  /** Persons per household from the corroborated census figure; null = unknown. */
+  hh_size: number | null;
 }
 
 export interface CountyMetrics {
@@ -130,7 +148,7 @@ export interface SourceInfo {
 /* ------------------------------------------------------------------------- */
 
 /**
- * The four dimensions of "is this a good place to open a pharmacy".
+ * The six dimensions of "is this a good place to open a pharmacy".
  * Weights are relative — only their ratios matter. They are deliberately NOT
  * hard-coded into SQL so the dashboard can re-rank live.
  */
@@ -143,13 +161,38 @@ export interface Weights {
   pipeline: number;
   /** Administrative barrier (`min_score`). Higher == harder to win a permit. */
   barrier: number;
+  /**
+   * Buying power of the catchment. This is the out-of-pocket half of the
+   * business: a richer district buys more cosmetics, supplements and OTC drugs
+   * per head, at a much fatter margin than an insured prescription.
+   */
+  affluence: number;
+  /**
+   * Tolerance for ONE MORE pharmacy — the "what if it were us?" half of
+   * headroom.
+   *
+   * `headroom` asks how crowded the place is TODAY; this asks what it looks
+   * like the day after you open. A 5,000-person town with one pharmacy reads as
+   * an ideal 5,000-per-pharmacy market — until you become the second pharmacy
+   * and it is 2,500 each. A 20,000-person town with four pharmacies gives up
+   * far less (5,000 -> 4,000), so it tolerates a new entrant better even though
+   * it is more saturated right now. Scored on patients-per-pharmacy AFTER
+   * entry: population / (committed + 1), where committed = open pharmacies plus
+   * every موافقت‌اصولی already granted, because those open whatever we do.
+   */
+  tolerance: number;
 }
 
 export const DEFAULT_WEIGHTS: Weights = {
-  demand: 30,
-  headroom: 40,
-  pipeline: 20,
+  demand: 25,
+  /* Headroom hands half its weight to `tolerance`: today's density and
+     post-entry density measure nearly the same thing, and the post-entry one is
+     the decision actually being made. */
+  headroom: 10,
+  pipeline: 15,
   barrier: 10,
+  affluence: 20,
+  tolerance: 20,
 };
 
 export interface Tunables {
@@ -206,7 +249,7 @@ export interface Tunables {
  * carries no «شهر» prefix and would be dropped by `place_kind = 'city'`.
  */
 export const DEFAULT_TUNABLES: Tunables = {
-  minPopulation: 20_000,
+  minPopulation: 3_000,
   populationMode: "fda",
   targetPopulationPerPharmacy: 0, // 0 => auto (median of the peer set)
   basis: "national",
@@ -274,6 +317,10 @@ export function applyPopulationMode(
       n_pharmacy_real: real,
       n_pharmacy_legal: legal,
       n_pharmacy_total: ph,
+      /* Re-derived from the (possibly corrected) count so a manual edit does not
+         leave the committed figure — and with it tolerance — stale. Without an
+         override this equals the view's real + legal + approved exactly. */
+      n_pharmacy_committed: ph + p.n_req_approved,
       population,
       pharmacies_per_100k:
         population && population > 0
@@ -333,6 +380,9 @@ export function warningsFor(
   if (f.includes("bad_name")) out.push("نام آبادی در منبع ناقص است");
   if (f.includes("no_activity")) {
     out.push("در منبع هیچ داروخانه و هیچ متقاضی‌ای ثبت نشده");
+  }
+  if (f.includes("no_fda_data")) {
+    out.push("دادهٔ FDA ندارد — خارج از فید بوده، تعداد داروخانه نامشخص");
   }
 
   /* A manual override or a corroborated reference supersedes the FDA's own
@@ -412,9 +462,11 @@ export const DQ_LABELS: Record<string, string> = {
   bad_name: "نام آبادی در منبع ناقص است، مثل «**» (سد: کنار گذاشته شد)",
   no_activity:
     "در منبع هیچ داروخانه و هیچ متقاضی‌ای ثبت نشده؛ پیش از اعتماد میدانی بررسی کنید",
+  no_fda_data:
+    "دادهٔ FDA ندارد: این مکان اصلاً در فید نبوده؛ تعداد داروخانه نامشخص است و خودتان باید بررسی کنید",
 };
 
-export const SOFT_FLAGS = new Set(["no_activity"]);
+export const SOFT_FLAGS = new Set(["no_activity", "no_fda_data"]);
 
 export function dqFlagList(
   flags: string | null,
@@ -435,6 +487,10 @@ export interface ScoreBreakdown {
   headroom: number;
   pipeline: number;
   barrier: number;
+  /** Percentile of the catchment's buying power (see lib/otc.ts). */
+  affluence: number;
+  /** Percentile of patients-per-pharmacy AFTER our own entry (pop / (n+1)). */
+  tolerance: number;
   /** Weighted composite, 0..100. */
   opportunity: number;
 }
@@ -453,6 +509,22 @@ export interface ScoredPlace extends PlaceMetrics {
   absorbablePharmacies: number;
   /** Est. annual prescriptions the marginal entrant pharmacy would capture. */
   estScriptsForEntrant: number;
+  /** Patients per pharmacy the day you open: population / (committed + 1). */
+  postEntryPopPerPharmacy: number;
+  /** Pharmacies per 100k after your entry — the same thing, other way up. */
+  postEntryDensity: number;
+  /** Share of the per-pharmacy pool you take, 0–100 (1/(committed+1)). */
+  entryDilutionPct: number;
+  /** Buying power relative to the national average: 1 = average, 1.2 = 20% richer. */
+  buying_power: number;
+  /** Percentile rank of `buying_power` in the compared set (100 = richest). */
+  prosperity: number;
+  /** «کم‌برخوردار» … «برخوردار» — the band behind `prosperity`. */
+  prosperity_band: string;
+  /** Out-of-pocket sales estimate: per capita, market, per pharmacy, your share. */
+  otc: OtcEstimate;
+  /** Each of the four buying-power factors, so the panel can show its work. */
+  affluence_factors: AffluenceFactors;
   /**
    * Everything about this row's data that deserves a second look, in Persian.
    * Empty means clean. Shown as a badge; never a reason to delete the row.
@@ -503,20 +575,30 @@ export function median(values: number[]): number {
 }
 
 /**
- * Placeholder economics for the optional revenue panel. These are STARTING
- * ASSUMPTIONS, not measured values — the dashboard exposes them as inputs so
- * they can be replaced with real figures.
+ * Economics and OTC assumptions for the revenue panels. These are STARTING
+ * ASSUMPTIONS, not measured values — the dashboard exposes every one of them as
+ * an input so they can be replaced with real figures (see lib/otc.ts for how the
+ * OTC per-capita default is derived from the official yearbook anchor).
  */
 export interface UnitEconomics {
   /** Prescriptions dispensed per person per year (whole population). */
   scriptsPerCapitaPerYear: number;
   /** Net margin kept per prescription, in IRR. */
   netMarginPerScriptIRR: number;
+  /** OTC + cosmetics + supplements, rial per person per year at average buying power. */
+  otcPerCapitaIRR: number;
+  /** Income elasticity of the out-of-pocket basket (>1 = richer places spend more). */
+  otcElasticity: number;
+  /** Measured rural vs urban household spending ratio, from the yearbook anchor. */
+  ruralToUrbanRatio: number;
 }
 
 export const DEFAULT_ECONOMICS: UnitEconomics = {
   scriptsPerCapitaPerYear: 6,
   netMarginPerScriptIRR: 250_000,
+  otcPerCapitaIRR: DEFAULT_OTC.perCapitaIRR,
+  otcElasticity: DEFAULT_OTC.elasticity,
+  ruralToUrbanRatio: DEFAULT_OTC.ruralToUrbanRatio,
 };
 
 /* ------------------------------------------------------------------------- */
@@ -633,6 +715,13 @@ export function scorePlaces(
   const base = work.filter(
     (p) =>
       (p.population ?? 0) > 0 &&
+      /* No pharmacy figure means no density, no headroom, no score. The row is
+         still listed (sorted last, badged) — see the admin-layer places. */
+      !(p.dq_flags ?? "").includes("no_fda_data") &&
+      /* A settlement with no pharmacy AND no applicant anywhere is not a ranked
+         market yet: the feed may simply attribute its pharmacies to a
+         neighbouring town. It is listed and badged, never scored. */
+      !(p.n_pharmacy_total === 0 && p.n_req_pipeline === 0 && p.is_market !== 1) &&
       !isUnresolvedOutlier(p, tunables.populationMode),
   );
   if (!base.length) return [];
@@ -674,9 +763,48 @@ export function scorePlaces(
     groupOf,
   );
 
+  /* Buying power. The scale is the population-weighted mean of the raw factors
+     over the compared set, which is what makes 1.0 mean "the national average"
+     and keeps the per-capita money figures consistent with the national total. */
+  const ruralRatio = economics.ruralToUrbanRatio;
+  const scale = affluenceScale(base, ruralRatio);
+  const rAffluence = percentileRanksGrouped(
+    base,
+    (p) => buyingPower(p, scale, ruralRatio),
+    groupOf,
+  );
+
+  /* Tolerance: the state of the market AFTER we open, which is the only state
+     we would actually be trading in. Density as it stands today flatters a
+     one-pharmacy town (5,000/1 looks better than 20,000/4) even though adding
+     the second pharmacy halves its ratio while adding a fifth barely dents the
+     bigger one.
+     The denominator counts committed pharmacies, not open ones: a permit with
+     موافقت‌اصولی is a pharmacy that WILL trade no matter what we do, so it
+     dilutes the pool exactly like an open one. Ranked on patients per pharmacy
+     once we are in among them. */
+  const rTolerance = percentileRanksGrouped(
+    base,
+    (p) => (p.population ?? 0) / (p.n_pharmacy_committed + 1),
+    groupOf,
+  );
+  /* Display index for buying power: always a rank inside the whole compared
+     set (never per-province), so the number reads the same whichever basis is
+     selected. `basePrices` is the sorted reference sample. */
+  const sortedBp = base
+    .map((p) => buyingPower(p, scale, ruralRatio))
+    .sort((a, b) => a - b);
+
   const pctOf = new Map<
     number,
-    { demand: number; density: number; pipeline: number; barrier: number }
+    {
+      demand: number;
+      density: number;
+      pipeline: number;
+      barrier: number;
+      affluence: number;
+      tolerance: number;
+    }
   >();
   base.forEach((p, i) =>
     pctOf.set(p.location_id, {
@@ -684,11 +812,19 @@ export function scorePlaces(
       density: rDensity[i],
       pipeline: rPipeline[i],
       barrier: rBarrier[i],
+      affluence: rAffluence[i],
+      tolerance: rTolerance[i],
     }),
   );
 
   const w = tunables.weights;
-  const wSum = w.demand + w.headroom + w.pipeline + w.barrier || 1;
+  const wSum =
+    w.demand +
+      w.headroom +
+      w.pipeline +
+      w.barrier +
+      w.affluence +
+      w.tolerance || 1;
 
   // --- capacity sizing -----------------------------------------------------
   const observedPopPerPharmacy = base
@@ -709,24 +845,67 @@ export function scorePlaces(
           headroom: 100 - pct.density, // less dense than peers -> better
           pipeline: 100 - pct.pipeline, // less pipeline than peers -> better
           barrier: 100 - pct.barrier, // lower threshold -> better
+          affluence: pct.affluence, // richer catchment -> better
+          tolerance: pct.tolerance, // more patients per pharmacy after entry
           opportunity: 0,
         }
-      : { demand: 0, headroom: 0, pipeline: 0, barrier: 0, opportunity: 0 };
+      : {
+          demand: 0,
+          headroom: 0,
+          pipeline: 0,
+          barrier: 0,
+          affluence: 0,
+          tolerance: 0,
+          opportunity: 0,
+        };
 
     if (scorable) {
       scores.opportunity =
         (scores.demand * w.demand +
           scores.headroom * w.headroom +
           scores.pipeline * w.pipeline +
-          scores.barrier * w.barrier) /
+          scores.barrier * w.barrier +
+          scores.affluence * w.affluence +
+          scores.tolerance * w.tolerance) /
         wSum;
     }
 
     const population = p.population ?? 0;
-    const capacityGap = population / target - p.n_pharmacy_total;
-    const competitorCount = p.n_pharmacy_total + 1; // you are the +1
+    /* Room left is measured against committed supply, not open supply: the
+       approved ones are already spoken for and will take their share first. */
+    const capacityGap = population / target - p.n_pharmacy_committed;
+    /* "With us in it" — the field we play on once our permit is issued. That is
+       today's pharmacies, plus every pharmacy already granted a موافقت‌اصولی
+       (it opens whatever we do, so it is a certain competitor, not a maybe),
+       plus ours. Counting only the open ones flatters a town whose second
+       pharmacy is already approved and on its way. */
+    const withUs = p.n_pharmacy_committed + 1;
     const estScriptsForEntrant =
-      (population * economics.scriptsPerCapitaPerYear) / competitorCount;
+      (population * economics.scriptsPerCapitaPerYear) / withUs;
+    /* The same +1 the script estimate uses, expressed as a market ratio: what
+       the place looks like with your pharmacy in the queue. */
+    const postEntryPopPerPharmacy = population / withUs;
+    const postEntryDensity =
+      population > 0 ? (withUs * 100_000) / population : 0;
+    const entryDilutionPct = 100 / withUs; // 1/(committed+1) of the pool is yours
+
+    /* Buying power and the out-of-pocket basket. Computed for EVERY row, even
+       the unscorable ones: the estimate is a property of the place, not of the
+       ranking, and a row without a usable population still shows — honestly —
+       which part of its numbers is missing. */
+    const bp = buyingPower(p, scale, ruralRatio);
+    const prosperity = percentileOf(bp, sortedBp);
+    const otc = otcEstimate(
+      population,
+      bp,
+      p.n_pharmacy_total,
+      {
+        perCapitaIRR: economics.otcPerCapitaIRR,
+        elasticity: economics.otcElasticity,
+        ruralToUrbanRatio: ruralRatio,
+      },
+      p.n_pharmacy_committed,
+    );
 
     const warnings = warningsFor(p, tunables.populationMode);
     if (runtimeSuspects.has(p.location_id) && warnings.length === 0) {
@@ -744,6 +923,16 @@ export function scorePlaces(
       capacityGap: Math.round(capacityGap * 10) / 10,
       absorbablePharmacies: Math.max(0, Math.round(capacityGap)),
       estScriptsForEntrant: Math.round(estScriptsForEntrant),
+      postEntryPopPerPharmacy:
+        population > 0 ? Math.round(postEntryPopPerPharmacy) : 0,
+      postEntryDensity:
+        Math.round(postEntryDensity * 100) / 100,
+      entryDilutionPct: Math.round(entryDilutionPct),
+      buying_power: Math.round(bp * 1000) / 1000,
+      prosperity,
+      prosperity_band: PROSPERITY_LABELS[prosperityBand(prosperity)],
+      otc,
+      affluence_factors: affluenceFactors(p, ruralRatio),
       warnings,
       scorable,
     };

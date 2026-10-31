@@ -39,6 +39,25 @@ export interface ReferenceCoverage {
   materially_different: number;
 }
 
+/**
+ * The official anchor behind the out-of-pocket (OTC) model, from the provincial
+ * yearbook: how much an urban and a rural household actually spends per year,
+ * and what that is per person. `null` when the yearbook chapter is not loaded —
+ * in which case the model falls back to its documented default and says so.
+ */
+export interface OtcAnchors {
+  year_sh: number;
+  source: string;
+  urban_hh_expenditure: number | null;
+  rural_hh_expenditure: number | null;
+  /** Measured rural vs urban spending: the village factor of the model. */
+  rural_to_urban_ratio: number | null;
+  urban_hh_size: number | null;
+  rural_hh_size: number | null;
+  urban_consumption_per_capita: number | null;
+  rural_consumption_per_capita: number | null;
+}
+
 export interface ScopeSummary {
   totalPlaces: number;
   totalPharmacies: number;
@@ -60,6 +79,8 @@ export interface DashboardData {
   universities: UniversitySummary[];
   dq: DqFlagSummary[];
   reference: ReferenceCoverage | null;
+  /** Yearbook anchor for the OTC model; null when the chapter is not loaded. */
+  otcAnchors: OtcAnchors | null;
   sources: SourceInfo[];
   scope: ScopeSummary;
   observedAt: string | null;
@@ -91,10 +112,22 @@ const PLACE_SQL = `
     fda_county_pharmacies, county_pharmacy_ratio,
     n_pharmacy_real, n_pharmacy_legal, n_pharmacy_total, n_pharmacy_committed,
     n_req_registered, n_req_inprogress, n_req_approved, n_req_pipeline,
-    pipeline_ratio, density_reported
+    pipeline_ratio, density_reported,
+    pp.county_urban_share, pp.hh_size
   FROM v_place_full
+  LEFT JOIN (SELECT location_id AS lid, county_urban_share, hh_size
+               FROM v_place_prosperity) pp
+         ON pp.lid = v_place_full.location_id
   WHERE is_market = 1
      OR (COALESCE(n_pharmacy_real, 0) + COALESCE(n_pharmacy_legal, 0)) > 0
+     -- places the FDA feed never listed (etl/link_admin_places.py): no pharmacy
+     -- figure exists, so they carry dq_flags = no_fda_data and stay unranked
+     OR dq_flags LIKE '%no_fda_data%'
+     -- Khuzestan's larger villages, even where the feed reports no pharmacy:
+     -- otherwise a 3,500-person village with a missing row is simply invisible.
+     OR (province LIKE '%خوزستان%' AND place_kind IN ('village','other')
+         AND COALESCE(effective_population, 0) >= 3000)
+
   ORDER BY COALESCE(ref_population, fda_population, 0) DESC
 `;
 
@@ -106,6 +139,7 @@ const EMPTY: DashboardData = {
   universities: [],
   dq: [],
   reference: null,
+  otcAnchors: null,
   sources: [],
   scope: {
     totalPlaces: 0,
@@ -163,6 +197,12 @@ export function loadDashboardData(): DashboardData {
   const reference =
     one<ReferenceCoverage>(`SELECT * FROM v_reference_coverage`) ?? null;
 
+  /* The OTC model's official anchor. Absent when the yearbook chapters (21 and
+     3) were never loaded — the model then falls back to its documented defaults
+     rather than silently pretending the anchor exists. */
+  const otcAnchors =
+    one<OtcAnchors>(`SELECT * FROM v_otc_anchors`) ?? null;
+
   const s = one<{
     total_places: number;
     total_ph: number;
@@ -198,6 +238,7 @@ export function loadDashboardData(): DashboardData {
     universities,
     dq,
     reference,
+    otcAnchors,
     sources,
     scope: {
       totalPlaces: s?.total_places ?? 0,

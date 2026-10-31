@@ -28,3 +28,7 @@ web/shots/
 
 # bundled 7-Zip binary (third-party)
 tools/7z/
+
+# generated admin-layer exports (regenerate with etl/report_admin.py)
+reports/admin_khuzestan.csv
+reports/admin_khuzestan.xlsx
