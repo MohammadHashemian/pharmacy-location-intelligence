@@ -34,11 +34,12 @@ import { group, num, shortCounty, toPersianDigits } from "@/lib/format";
 const W = 660;
 const H = 820;
 const PAD = 14;
+const MAX_ZOOM = 40;
 const RING_EDGES = [25, 50, 75, 100, 150, 200, 300];
 
 const COLORS = {
   city: "#4338ca",
-  village: "#475569",
+  village: "#334155",
   pharmacy: "#d97706",
   tree: "#94a3b8",
   reference: "#0f766e",
@@ -67,8 +68,15 @@ function hex(c: string): [number, number, number] {
 
 type Proj = (lat: number, lon: number) => [number, number];
 
+type Road = { d: string; cls: string; b: [number, number, number, number] };
+
 type Scene = {
   proj: Proj;
+  /** Screen units -> degrees, and km per scene unit (for the scale bar). */
+  inv: (x: number, y: number) => [number, number];
+  kmPerUnit: number;
+  /** scene units per degree of longitude (latitude is `scale`). */
+  kx: number;
   scale: number;
   cellW: number;
   cellH: number;
@@ -133,7 +141,7 @@ function buildScene(data: MapData): Scene {
   const pts = data.settlements.map((p) => {
     const [x, y] = proj(p.lat, p.lon);
     const pop = p.pop ?? 0;
-    return { x, y, r: 1.7 + Math.min(7.5, Math.sqrt(pop) / 46) };
+    return { x, y, r: 2.1 + Math.min(7, Math.sqrt(pop) / 60) };
   });
 
   const edges: [number, number, number, number][] = data.edges.map(([a, b]) => [
@@ -193,6 +201,12 @@ function buildScene(data: MapData): Scene {
 
   return {
     proj,
+    inv: (x: number, y: number): [number, number] => [
+      latMax - (y - offY) / scale,
+      lonMin + (x - offX) / (kx * scale),
+    ],
+    kmPerUnit: 110.57 / scale,
+    kx: kx * scale,
     scale,
     cellW: 0.033 * kx * scale,
     cellH: 0.03 * scale,
@@ -320,11 +334,80 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   }, []);
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
+  /** Names that occur more than once in the province — their label needs the
+      شهرستان or the map shows six identical «مرکزی» pins. */
+  const dupNames = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const s of settlements) seen.set(s.name, (seen.get(s.name) ?? 0) + 1);
+    return new Set([...seen.entries()].filter(([, n]) => n > 1).map(([k]) => k));
+  }, [settlements]);
+
   const indexOf = useMemo(() => {
     const m = new Map<number, number>();
     settlements.forEach((s, i) => m.set(s.id, i));
     return m;
   }, [settlements]);
+
+  /* Four corner points of what the current pan/zoom shows, in scene units.
+     Labels, roads and the settlement tiers are all filtered by it, so the map
+     stays readable instead of drawing 3.6k names at every zoom. */
+  const visible = useMemo(() => {
+    const x0 = -view.tx / view.k;
+    const y0 = -view.ty / view.k;
+    return { x0, y0, x1: x0 + W / view.k, y1: y0 + H / view.k };
+  }, [view]);
+
+  /* The fine density grid is recomputed from the settlement list whenever the
+     view settles — 30-60 ms of work that must not run on every wheel tick. */
+  const [settled, setSettled] = useState(view);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(view), 160);
+    return () => clearTimeout(t);
+  }, [view]);
+
+  /** Point chosen on empty ground: the "should I put a pharmacy here" probe. */
+  const [probe, setProbe] = useState<{ lat: number; lon: number } | null>(null);
+  const [probeMode, setProbeMode] = useState(false);
+
+  /* Roads come from a static asset (1.5 MB), not the RSC payload: they never
+     change between requests and the browser caches them. */
+  const [roads, setRoads] = useState<Road[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch("/geo/khuzestan_roads.geojson")
+      .then((r) => r.json())
+      .then((fc: {
+        features: {
+          properties: { cls: string; bbox: [number, number, number, number] };
+          geometry: { coordinates: [number, number][] };
+        }[];
+      }) => {
+        if (!alive) return;
+        const out: Road[] = fc.features.map((f) => {
+          const pts = f.geometry.coordinates;
+          const d =
+            pts
+              .map(([lo, la], i) => {
+                const [x, y] = scene.proj(la, lo);
+                return `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+              })
+              .join(" ") || "";
+          const [x0, y0, x1, y1] = f.properties.bbox;
+          const [ax, ay] = scene.proj(y0, x0);
+          const [bx, by] = scene.proj(y1, x1);
+          return {
+            cls: f.properties.cls,
+            b: [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)],
+            d,
+          };
+        });
+        setRoads(out);
+      })
+      .catch(() => setRoads(null));
+    return () => {
+      alive = false;
+    };
+  }, [scene]);
 
   const selectedIdx = selected === null ? undefined : indexOf.get(selected);
   const selectedS = selectedIdx === undefined ? null : settlements[selectedIdx];
@@ -406,6 +489,44 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     return { n: candidates.length, pop, ph, empty };
   }, [candidates]);
 
+  /* Catchment around the picked point. This is the number the decision needs:
+     how many people and how many pharmacies inside 1/2/5/10 km, and what that
+     implies per pharmacy against the target. */
+  const probeStats = useMemo(() => {
+    if (!probe) return null;
+    const R = 6371.0088;
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const km = (aLat: number, aLon: number, bLat: number, bLon: number) => {
+      const dp = rad(bLat - aLat);
+      const dl = rad(bLon - aLon);
+      const h =
+        Math.sin(dp / 2) ** 2 +
+        Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dl / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    };
+    const withDist = settlements
+      .filter((s) => s.lat !== null)
+      .map((s) => ({ s, km: km(probe.lat, probe.lon, s.lat, s.lon) }))
+      .sort((a, b) => a.km - b.km);
+    const radii = [1, 2, 5, 10].map((r) => {
+      const inR = withDist.filter((x) => x.km <= r);
+      const pop = inR.reduce((a, x) => a + (x.s.pop ?? 0), 0);
+      const ph = inR.reduce((a, x) => a + x.s.ph, 0);
+      return {
+        r,
+        n: inR.length,
+        pop,
+        ph,
+        perPharm: ph ? Math.round(pop / ph) : null,
+        gap: pop / targetPerPharm - ph,
+      };
+    });
+    const nearestCity = withDist.find((x) => x.s.kind === "city");
+    const distAhvaz = km(probe.lat, probe.lon, data.meta.referenceLat, data.meta.referenceLon);
+    const nearest = withDist.slice(0, 6);
+    return { radii, nearestCity, distAhvaz, nearest, point: probe };
+  }, [probe, settlements, targetPerPharm, data.meta.referenceLat, data.meta.referenceLon]);
+
   const ladder = useMemo(() => {
     const edges = [0, ...RING_EDGES];
     return edges.map((lo, i) => {
@@ -429,7 +550,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   }, []);
 
   const clampView = useCallback((k: number, tx: number, ty: number) => {
-    const kk = Math.max(1, Math.min(14, k));
+    const kk = Math.max(1, Math.min(MAX_ZOOM, k));
     const minX = W - W * kk;
     const minY = H - H * kk;
     return {
@@ -454,7 +575,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     const v = viewRef.current;
     const mx = ((e.clientX - rect.left) / rect.width) * W;
     const my = ((e.clientY - rect.top) / rect.height) * H;
-    const k = Math.max(1, Math.min(14, v.k * Math.exp(-e.deltaY * 0.0016)));
+    const k = Math.max(1, Math.min(MAX_ZOOM, v.k * Math.exp(-e.deltaY * 0.0016)));
     commit(k, mx - (mx - v.tx) * (k / v.k), my - (my - v.ty) * (k / v.k));
   };
 
@@ -502,7 +623,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   /* ----------------------------------------------------------- zoom helpers */
   const zoomBy = (f: number) => {
     const v = viewRef.current;
-    const k = Math.max(1, Math.min(14, v.k * f));
+    const k = Math.max(1, Math.min(MAX_ZOOM, v.k * f));
     commit(k, W / 2 - (W / 2 - v.tx) * (k / v.k), H / 2 - (H / 2 - v.ty) * (k / v.k));
   };
 
@@ -525,23 +646,27 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           const on = inside[i] === 1;
           const isSel = s.id === selected;
           const city = s.kind === "city";
+          /* Screen-constant symbol: a marker must stay a marker when the map is
+             zoomed 20x, otherwise the whole town is one dot. */
+          const r = (p.r + (isSel ? 2 : 0)) / view.k;
           return (
             <circle
               key={s.id}
               cx={p.x}
               cy={p.y}
-              r={p.r + (isSel ? 2 : 0)}
+              r={r}
               fill={city ? COLORS.city : COLORS.village}
               fillOpacity={on ? (city ? 0.9 : 0.72) : 0.12}
               stroke={isSel ? "#0f172a" : s.ph > 0 && layers.pharm ? COLORS.pharmacy : "none"}
-              strokeWidth={isSel ? 1.6 : 0.9}
+              strokeWidth={isSel ? 1.8 : 1.1}
+              vectorEffect="non-scaling-stroke"
               strokeOpacity={isSel ? 1 : 0.95}
             />
           );
         })}
       </g>
     ),
-    [scene, settlements, inside, selected, layers.pharm],
+    [scene, settlements, inside, selected, layers.pharm, view.k],
   );
 
   const edgeLayer = useMemo(
@@ -561,7 +686,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     const p = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 1;
     const hi = Math.max(1e-9, p(0.97));
     return (
-      <g opacity={0.85} shapeRendering="crispEdges" clipPath="url(#provClip)">
+      <g
+        opacity={view.k >= 3.4 ? 0 : Math.max(0.2, 0.85 - (view.k - 1) * 0.16)}
+        shapeRendering="crispEdges"
+        clipPath="url(#provClip)"
+      >
         {scene.cells.map((c, i) => (
           <rect
             key={i}
@@ -575,7 +704,131 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         ))}
       </g>
     );
-  }, [scene, mode]);
+  }, [scene, mode, view.k]);
+
+  /* Fine density at city scale. The province-wide grid is 3.3 km, which is the
+     right unit for a region and far too coarse for "which side of this town".
+     Above 4x this recomputes the same measure on a 1 km grid over the visible
+     box only, straight from the settlement list — population and pharmacies
+     within 3 km, cells kept only where a settlement is within 1.2 km. */
+  const fineCells = useMemo(() => {
+    if (settled.k < 3.4) return null;
+    const x0 = -settled.tx / settled.k;
+    const y0 = -settled.ty / settled.k;
+    const w = W / settled.k;
+    const h = H / settled.k;
+    const [latTop, lonLeft] = scene.inv(x0, y0);
+    const [latBot, lonRight] = scene.inv(x0 + w, y0 + h);
+    const latLo = Math.min(latTop, latBot);
+    const latHi = Math.max(latTop, latBot);
+    const lonLo = Math.min(lonLeft, lonRight);
+    const lonHi = Math.max(lonLeft, lonRight);
+    if (latHi - latLo > 3.5) return null;          // never on the province view
+
+    // 1 km is the unit a site decision needs; beyond this many cells the view is
+    // too wide for the fine grid and the province-wide one takes over
+    const stepKm = 1;
+    if (((latHi - latLo) / (stepKm / 110.57)) * ((lonHi - lonLo) / (stepKm / 95)) > 16000) {
+      return null;
+    }
+    const dLat = stepKm / 110.57;
+    const dLon = stepKm / (111.32 * Math.cos((((latHi + latLo) / 2) * Math.PI) / 180));
+
+    // bucket the settlements on 3 km cells: the window is 3 km
+    const b: Map<number, number[]> = new Map();
+    const key = (la: number, lo: number) => Math.floor(la / 0.03) * 100000 + Math.floor(lo / 0.03);
+    settlements.forEach((s, i) => {
+      const kk = key(s.lat, s.lon);
+      const list = b.get(kk);
+      if (list) list.push(i);
+      else b.set(kk, [i]);
+    });
+
+    const R = 6371.0088;
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const dist = (aLat: number, aLon: number, bLat: number, bLon: number) => {
+      const dp = rad(bLat - aLat);
+      const dl = rad(bLon - aLon);
+      const hh =
+        Math.sin(dp / 2) ** 2 +
+        Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dl / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(hh));
+    };
+
+    const out: { x: number; y: number; v: number; pop: number; ph: number; n: number }[] = [];
+    let maxV = 1;
+    for (let la = latLo; la <= latHi; la += dLat) {
+      for (let lo = lonLo; lo <= lonHi; lo += dLon) {
+        let near = 0;
+        let pop = 0;
+        let ph = 0;
+        let n = 0;
+        for (let oa = -1; oa <= 1; oa++) {
+          for (let ol = -1; ol <= 1; ol++) {
+            for (const i of b.get(key(la + oa * 0.03, lo + ol * 0.03)) ?? []) {
+              const s = settlements[i];
+              const d = dist(la, lo, s.lat, s.lon);
+              if (d <= 1.5) near = 1;
+              if (d <= 3) {
+                pop += s.pop ?? 0;
+                ph += s.ph;
+                n += 1;
+              }
+            }
+          }
+        }
+        if (!near || pop <= 0) continue;
+        const v = mode === "dens" ? (ph / pop) * 1e4 : Math.max(0, pop / targetPerPharm - ph);
+        if (v > maxV) maxV = v;
+        const [cx, cy] = scene.proj(la, lo);
+        out.push({ x: cx, y: cy, v, pop, ph, n });
+      }
+    }
+    return { cells: out, max: maxV, stepKm, dLat, dLon };
+  }, [settled, scene, settlements, mode, targetPerPharm]);
+
+  /* Roads: culled to the viewport and to the class the zoom level needs, then
+     concatenated into two paths — 8k <path> nodes would choke the renderer. */
+  const roadLayer = useMemo(() => {
+    if (!roads || view.k < 1.25) return null;
+    const pad = 20 / view.k;
+    const heavy: string[] = [];
+    const light: string[] = [];
+    for (const r of roads) {
+      const [x0, y0, x1, y1] = r.b;
+      if (
+        x1 < visible.x0 - pad ||
+        x0 > visible.x1 + pad ||
+        y1 < visible.y0 - pad ||
+        y0 > visible.y1 + pad
+      ) {
+        continue;
+      }
+      const isHeavy = r.cls === "motorway" || r.cls === "trunk" || r.cls === "primary";
+      if (!isHeavy && view.k < 2.5) continue;
+      (isHeavy ? heavy : light).push(r.d);
+    }
+    return (
+      <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+        {light.length ? (
+          <path
+            d={light.join(" ")}
+            stroke="#c3cedd"
+            strokeWidth={1.2}
+            strokeOpacity={0.75}
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+        <path
+          d={heavy.join(" ")}
+          stroke="#8fa0b8"
+          strokeWidth={2}
+          strokeOpacity={0.6}
+          vectorEffect="non-scaling-stroke"
+        />
+      </g>
+    );
+  }, [roads, visible, view.k]);
 
   const adminLayer = useMemo(
     () => (
@@ -623,8 +876,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
        boxes only fit more labels as you zoom in, never fewer. */
     const boxes: { x1: number; y1: number; x2: number; y2: number }[] = [];
     const place = (x: number, y: number, text: string, size: number): boolean => {
-      const w = text.length * size * 0.8 + 5 / k;
-      const h = size * 1.25 + 4 / k;
+      const em = size / k;                 // the font is rendered at size/k
+      const w = text.length * em * 0.8 + 5 / k;
+      const h = em * 1.25 + 4 / k;
       // SVG text sits on a baseline, not centred on y: the glyph box is mostly
       // above the anchor, which is exactly where the boxes have to collide
       const b = { x1: x - w / 2, y1: y - h * 0.95, x2: x + w / 2, y2: y + h * 0.35 };
@@ -648,27 +902,33 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     };
     const labels: Label[] = [];
 
-    for (const c of scene.counties) {
+    const vis = visible;
+    const inView = (x: number, y: number) =>
+      x > vis.x0 - 30 && x < vis.x1 + 30 && y > vis.y0 - 30 && y < vis.y1 + 30;
+
+    if (k < 8)
+      for (const c of scene.counties) {
       labels.push({
         key: `c${c.name}`,
         x: c.x,
         y: c.y,
         text: shortCounty(c.name),
-        size: 12 * u,
+        size: 13 * u,
         weight: 700,
         fill: "#1e293b",
         opacity: 0.82,
         halo: 2.2,
       });
     }
-    if (k >= 2.1) {
+    if (k >= 2.1 && k < 16) {
       for (const b of scene.bakhsh) {
+        if (!inView(b.lx, b.ly)) continue;
         labels.push({
           key: `b${b.name}`,
           x: b.lx,
           y: b.ly,
           text: strip(b.name, "بخش "),
-          size: 9 * u,
+          size: 10 * u,
           weight: 500,
           fill: "#475569",
           opacity: 0.7,
@@ -676,38 +936,53 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         });
       }
     }
-    if (k >= 3.4 && !compact) {
+    if (k >= 3.4 && k < 13 && !compact) {
       for (const d of scene.dehestans) {
+        if (!inView(d.x, d.y)) continue;
         labels.push({
           key: `d${d.name}`,
           x: d.x,
           y: d.y,
           text: strip(d.name, "دهستان "),
-          size: 8 * u,
+          size: 9.5 * u,
           weight: 400,
           fill: "#64748b",
           opacity: 0.68,
-          halo: 1.4,
+          halo: 2,
         });
       }
     }
-    if (k >= 4.6) {
-      const vis = settlements.filter(
-        (s) => inside[indexOf.get(s.id) ?? 0] === 1 && (s.pop ?? 0) >= 120,
-      );
-      for (const s of vis.slice(0, compact ? 70 : 160)) {
+    /* Settlements by zoom: at province scale only the big cities, at street
+       scale every village in view with its pharmacy count. This is the layer
+       the site decision is actually made on. */
+    if (k >= 2.6) {
+      const minPop = k < 4 ? 2500 : k < 6 ? 700 : k < 10 ? 150 : 0;
+      const cap = compact ? 90 : k < 4 ? 80 : k < 8 ? 180 : 340;
+      const shown = settlements
+        .filter((s) => {
+          if (inside[indexOf.get(s.id) ?? 0] !== 1) return false;
+          if ((s.pop ?? 0) < minPop) return false;
+          const i = indexOf.get(s.id)!;
+          return inView(scene.pts[i].x, scene.pts[i].y);
+        })
+        .slice(0, cap);
+      for (const s of shown) {
         const i = indexOf.get(s.id)!;
         const p = scene.pts[i];
+        const ph = k >= 6 && s.ph > 0 ? ` · ${group(s.ph)}` : "";
         labels.push({
           key: `v${s.id}`,
           x: p.x,
-          y: p.y - (p.r + 1.8) / k,
-          text: `${s.name} ${group(s.pop)}`,
-          size: 7.5 * u,
-          weight: 500,
-          fill: "#0f172a",
-          opacity: 0.9,
-          halo: 1.4,
+          y: p.y - (p.r + 2.2) / k,
+          text:
+            k >= 6 && dupNames.has(s.name) && s.county
+              ? `${s.name} · ${shortCounty(s.county)}${ph}`
+              : `${s.name}${ph}`,
+          size: 9.5 * u,
+          weight: s.ph > 0 ? 600 : 450,
+          fill: s.ph > 0 ? "#0b3b36" : "#1e293b",
+          opacity: 0.95,
+          halo: 2.2,
         });
       }
     }
@@ -734,7 +1009,17 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       );
     }
     return <g pointerEvents="none">{out}</g>;
-  }, [scene, settlements, layers.labels, view.k, inside, indexOf, compact, unitsPerPx]);
+  }, [scene, settlements, layers.labels, view.k, inside, indexOf, compact, unitsPerPx, visible, dupNames]);
+
+  /* Scale bar: constant 90 CSS px, with the kilometre value following the zoom.
+     Drawn outside the pan/zoom group so it never moves with the map. */
+  const scaleBar = useMemo(() => {
+    const kmPerUnit = scene.kmPerUnit / view.k;      // km per viewBox unit
+    const unitsFor90 = 90 * unitsPerPx;
+    const raw = unitsFor90 * kmPerUnit;
+    const nice = [1, 2, 5, 10, 20, 50, 100, 200].find((v) => v >= raw) ?? 250;
+    return { km: nice, units: nice / kmPerUnit };
+  }, [scene.kmPerUnit, view.k, unitsPerPx]);
 
   const hoverS = hover ? settlements[hover.i] : null;
 
@@ -742,7 +1027,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
       {/* ------------------------------------------------------------ map -- */}
       <div
-        style={{ maxWidth: "min(100%, 760px, calc(88vh * 0.805))" }}
+        style={{ maxWidth: "min(100%, 760px, max(430px, calc((100vh - 360px) * 0.805)))" }}
         className="mx-auto w-full min-w-0 rounded-2xl border border-line bg-surface p-2 shadow sm:p-3-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)] xl:sticky xl:top-3 xl:self-start">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -754,6 +1039,21 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             </span>
           </div>
           <div className="flex w-full flex-wrap items-center gap-1 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:pb-1">
+            <button
+              type="button"
+              onClick={() => {
+                setProbeMode((v) => !v);
+                if (probeMode) setProbe(null);
+              }}
+              className={`shrink-0 rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
+                probeMode
+                  ? "border-danger/40 bg-danger-soft text-danger"
+                  : "border-line bg-surface text-muted hover:text-ink"
+              }`}
+              title="روی هر نقطه از نقشه کلیک کنید تا جمعیت و داروخانه‌های اطراف آن سنجیده شود"
+            >
+              {probeMode ? "روی نقشه کلیک کنید…" : "تحلیل یک نقطه"}
+            </button>
             {(
               [
                 ["dens", "تراکم داروخانه"],
@@ -827,9 +1127,18 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 drag.current &&
                 Math.hypot(e.clientX - drag.current.x, e.clientY - drag.current.y) > 4;
               drag.current = null;
-              if (!moved && hover) {
-                select(settlements[hover.i], false);
+              if (moved) return;
+              if (probeMode) {
+                const [sx, sy] = toScene(e.clientX, e.clientY);
+                const [lat, lon] = scene.inv(sx, sy);
+                setProbe({ lat, lon });
+                setSelected(null);
+                if (viewRef.current.k < 6) {
+                  commit(6, W / 2 - sx * 6, H / 2 - sy * 6);
+                }
+                return;
               }
+              if (hover) select(settlements[hover.i], false);
             }}
           >
             <defs>
@@ -851,7 +1160,25 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}
             >
               {layers.admin ? adminLayer : null}
-              {layers.density ? cellLayer : null}
+              {roadLayer}
+              {layers.density && view.k < 3.4 ? cellLayer : null}
+              {layers.density && fineCells ? (
+                <g shapeRendering="crispEdges" clipPath="url(#provClip)" opacity={0.92}>
+                  {fineCells.cells.map((c, i) => (
+                    <rect
+                      key={i}
+                      x={c.x - (fineCells.dLon * scene.kx) / 2}
+                      y={c.y - (fineCells.dLat * scene.scale) / 2}
+                      width={fineCells.dLon * scene.kx + 0.25}
+                      height={fineCells.dLat * scene.scale + 0.25}
+                      fill={ramp(mode === "dens" ? DENS_RAMP : GAP_RAMP, c.v / fineCells.max)}
+                      /* low-value cells fade instead of painting white blocks
+                         that read as buildings on a pale basemap */
+                      fillOpacity={0.22 + 0.7 * Math.min(1, c.v / fineCells.max)}
+                    />
+                  ))}
+                </g>
+              ) : null}
 
               {/* distance rings around the reference city */}
               {RING_EDGES.map((km) => {
@@ -877,6 +1204,34 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
               {layers.network ? edgeLayer : null}
               {dotLayer}
+
+              {probe ? (
+                <g pointerEvents="none">
+                  {[1, 2, 5, 10].map((r) => (
+                    <circle
+                      key={r}
+                      cx={scene.proj(probe.lat, probe.lon)[0]}
+                      cy={scene.proj(probe.lat, probe.lon)[1]}
+                      r={r / scene.kmPerUnit}
+                      fill="none"
+                      stroke="#be123c"
+                      strokeOpacity={r <= 2 ? 0.85 : 0.45}
+                      strokeWidth={1.4}
+                      strokeDasharray={r <= 2 ? "none" : "5 4"}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  ))}
+                  <circle
+                    cx={scene.proj(probe.lat, probe.lon)[0]}
+                    cy={scene.proj(probe.lat, probe.lon)[1]}
+                    r={4 / view.k}
+                    fill="#be123c"
+                    stroke="#fff"
+                    strokeWidth={1.5}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </g>
+              ) : null}
 
               {selectedS ? (
                 <circle
@@ -944,7 +1299,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               ))}
             </div>
             <div className="mt-1 text-[10px] leading-4 text-faint">
-              فقط داخل محدودهٔ مسکونی (≤{num(data.meta.maskKm, 1)} کم از یک آبادی)
+              {view.k >= 3.4
+                ? "شبکهٔ ۱ کیلومتری، فقط روی زمین مسکونی"
+                : `فقط داخل محدودهٔ مسکونی (≤${num(data.meta.maskKm, 1)} کم از یک آبادی)`}
             </div>
           </div>
 
@@ -1002,6 +1359,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           <span className="flex items-center gap-1">
             <span className="h-2 w-2 rounded-full" style={{ background: COLORS.reference }} />
             {data.meta.referenceName} (مبدأ فاصله)
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-[3px] w-[90px] rounded-full bg-ink-soft/70" />
+            {group(scaleBar.km)} کیلومتر
           </span>
           <span className="flex items-center gap-1">
             <span className="h-0 w-4 border-t border-dashed border-brand" />
@@ -1107,6 +1468,77 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             جستجو روی همان لبه تنظیم شود.
           </p>
         </div>
+
+        {probeStats ? (
+          <div className="rounded-2xl border border-danger/25 bg-surface p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="text-[13px] font-semibold text-danger">تحلیل نقطهٔ انتخابی</div>
+                <div className="tnum text-[10.5px] leading-4 text-muted">
+                  {num(probeStats.point.lat, 4)} , {num(probeStats.point.lon, 4)}
+                </div>
+                <div className="text-[10.5px] leading-4 text-muted">
+                  {fmtKm(probeStats.distAhvaz)} از {data.meta.referenceName}
+                  {probeStats.nearestCity
+                    ? ` · نزدیک‌ترین شهر: ${probeStats.nearestCity.s.name} (${fmtKm(probeStats.nearestCity.km)})`
+                    : ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProbe(null)}
+                className="rounded-md border border-line-strong px-1.5 py-0.5 text-[10px] text-muted hover:text-ink"
+              >
+                بستن
+              </button>
+            </div>
+
+            <table className="mt-2 w-full text-[10.5px]">
+              <thead className="text-muted">
+                <tr>
+                  <th className="py-1 text-right font-medium">شعاع</th>
+                  <th className="py-1 text-left font-medium">آبادی</th>
+                  <th className="py-1 text-left font-medium">جمعیت</th>
+                  <th className="py-1 text-left font-medium">داروخانه</th>
+                  <th className="py-1 text-left font-medium">نفر/داروخانه</th>
+                  <th className="py-1 text-left font-medium">شکاف</th>
+                </tr>
+              </thead>
+              <tbody>
+                {probeStats.radii.map((r) => (
+                  <tr key={r.r} className="border-t border-line/70">
+                    <td className="tnum py-1 text-right">{group(r.r)} کم</td>
+                    <td className="tnum py-1 text-left">{group(r.n)}</td>
+                    <td className="tnum py-1 text-left">{group(r.pop)}</td>
+                    <td className="tnum py-1 text-left">{group(r.ph)}</td>
+                    <td className="tnum py-1 text-left">{r.perPharm ? group(r.perPharm) : "—"}</td>
+                    <td className={`tnum py-1 text-left font-medium ${r.gap > 0 ? "text-warn" : "text-muted"}`}>
+                      {signed(r.gap)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="mt-2 text-[10px] text-muted">نزدیک‌ترین آبادی‌ها</div>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {probeStats.nearest.map((n) => (
+                <button
+                  key={n.s.id}
+                  type="button"
+                  onClick={() => select(n.s, false)}
+                  className="rounded-md border border-line bg-surface-2 px-1.5 py-0.5 text-[10px] text-ink-soft hover:border-brand hover:text-brand-ink"
+                >
+                  {n.s.name} · {fmtKm(n.km)}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[10px] leading-4 text-faint">
+              جمعیت و داروخانه از سکونتگاه‌هایی است که مرکزشان داخل حلقه افتاده؛
+              شکاف = جمعیت ÷ هدف ({group(targetPerPharm)}) منهای داروخانه.
+            </p>
+          </div>
+        ) : null}
 
         {selectedS ? (
           <div className="rounded-2xl border border-brand/25 bg-surface p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">

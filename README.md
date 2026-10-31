@@ -777,8 +777,10 @@ baseline (5,408 residents per pharmacy in this dataset).
 ### Commands
 
 ```bash
-python etl/build_map_layer.py --check           # ~5 s: graph, density, polygons, asserts
+python etl/fetch_osm_roads.py                   # once: Overpass roads -> data/raw/osm (cached)
+python etl/build_map_layer.py --check           # ~5 s: graph, density, polygons, roads, asserts
 node web/scripts/proof-map.mjs                  # headless Chrome: screenshots + interaction assertions
+node web/scripts/proof-zoom.mjs                 # zoom ladder: symbol size, labels, grids, probe
 node web/scripts/probe-map-layout.mjs URL W H   # layout/overflow/label-size audit at any viewport
 ```
 
@@ -795,18 +797,32 @@ because the atlas only strokes it, and a filled map needs closed rings.
 **`/map`** (linked from the dashboard header). SVG only — no tile server, no map
 library, so it works offline and every pixel is accounted for:
 
-* dots are شهر/روستا, sized by population, haloed when the FDA feed lists a pharmacy;
-* the density overlay has two modes — تراکم (pharmacies per 10k) and شکاف
-  (population ÷ target − pharmacies);
-* the spanning tree can be drawn, so the network distance is traceable, not a number;
+* **zoom to 40×** on a 660×820 frame (~25 km across the screen at the deepest
+  level). Every symbol is drawn at a **constant screen size** (dot radius ÷ zoom,
+  `vector-effect: non-scaling-stroke`), so a city is a 6 px marker at every zoom
+  instead of a 300 px blob;
+* **two density grids**: the 3.3 km province grid below 3.4×, and above it a
+  **1 km grid recomputed from the settlement list over the visible box only**
+  (population and pharmacies within 3 km, cells kept where a settlement is within
+  1.5 km). The coarse grid is not merely faded — it is removed;
+* **roads as context** (`khuzestan_roads.geojson`, motorway/trunk/primary/secondary
+  from Overpass), culled to the viewport and to the class the zoom needs, drawn
+  under the points so a site can be judged against the road it sits on;
+* **labels that survive zooming**: sized in CSS pixels, counter-scaled by zoom,
+  chosen from what is *in view* — counties → بخش → دهستان → every settlement,
+  with the pharmacy count once the label has room, and the شهرستان added when a
+  village name repeats (30 places are called «مرکزی»);
+* **«تحلیل یک نقطه»** — click anywhere and the map answers the actual question:
+  population, pharmacies, persons-per-pharmacy and gap inside 1 / 2 / 5 / 10 km,
+  rings drawn on the map, plus the nearest settlements as clickable chips;
+* the spanning tree can be drawn, so the network distance is traceable;
 * a radius dial from 10 to 300 km, ring ladder (0–25 … 300+), search over
   name/شهرستان/بخش/دهستان, and a candidate table sorted by distance or by gap;
 * the detail panel prints the full path (استان › شهرستان › بخش › دهستان), the
   population with year and source, pharmacy counts, persons-per-pharmacy, the gap
   against an adjustable target, and all three distances with their provenance;
-* the province outline, the بخش fills and the density grid are clipped to the
-  province; labels are greedy-decluttered against each other and counter-scaled
-  so they keep a constant screen size while zooming.
+* a kilometre scale bar that follows the zoom, and a card sized so it fits the
+  viewport (`calc((100vh - 360px) * 0.805)`).
 
 ### Verification performed
 
@@ -824,6 +840,12 @@ panel opens with the same figures), clicks a ring row (radius 300 km, table
 re-scoped), toggles the layers (3,676 network lines appear, 0 admin paths when
 off), zooms (transform `scale(1)` → `scale(2.25)`, labels 30 → 79) and searches
 (rows 408 → 226). `next build` compiles the route as a partial prerender.
+
+`node web/scripts/proof-zoom.mjs` drives the + button through 1× → 25× and
+prints, per level: settlement markers **17 px at every zoom**, labels 26 → 73 →
+96 → 116, the coarse grid disappearing above 3.4× (2,742 → 226 → 72 rects as the
+fine grid takes over), and the point probe returning
+`۱ کم ۰ آبادی · ۲ کم ۳ · ۵ کم ۹ · ۱۰ کم ۱۹`. Screenshots land in `web/shots/`.
 
 `probe-map-layout.mjs` sweeps the breakpoints and prints the numbers the layout
 must satisfy: **no horizontal overflow at 390 / 768 / 1024 / 1280 / 1568 / 1920**

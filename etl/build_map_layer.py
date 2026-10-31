@@ -301,6 +301,59 @@ def export_polygons(filename: str, raw_name: str, tolerance: float,
     return fc, all_rings
 
 
+ROAD_CLASSES = {"motorway": 0.0006, "trunk": 0.0008, "primary": 0.0010,
+                "secondary": 0.0018}
+
+
+def export_roads() -> None:
+    """Major roads as thin context lines (OSM, `out geom`).
+
+    The map has no basemap: at city scale a settlement dot alone cannot answer
+    "is this on the Ahvaz–Shushtar road or behind the salt marsh". Secondary
+    roads are kept because that is what a rural site actually sits on, and each
+    way carries its class + bbox so the client can draw only what is visible and
+    only the classes its zoom level needs.
+    """
+    path = os.path.join(RAW, "khuzestan_roads.json")
+    if not os.path.exists(path):
+        print("  roads: data/raw/osm/khuzestan_roads.json missing — run "
+              "etl/fetch_osm_roads.py to add road context")
+        return
+    payload = json.load(open(path, encoding="utf-8"))
+    feats, pts_in, pts_out = [], 0, 0
+    for el in payload["elements"]:
+        cls = (el.get("tags") or {}).get("highway")
+        if cls not in ROAD_CLASSES:
+            continue
+        geom = el.get("geometry") or []
+        if len(geom) < 2:
+            continue
+        pts = [(p["lon"], p["lat"]) for p in geom]
+        pts_in += len(pts)
+        simp = rdp(pts, ROAD_CLASSES[cls])
+        pts_out += len(simp)
+        xs = [p[0] for p in simp]
+        ys = [p[1] for p in simp]
+        feats.append({
+            "type": "Feature",
+            "properties": {
+                "cls": cls,
+                "bbox": [round(min(xs), 4), round(min(ys), 4),
+                         round(max(xs), 4), round(max(ys), 4)],
+            },
+            "geometry": {"type": "LineString",
+                          "coordinates": [[round(x, 5), round(y, 5)] for x, y in simp]},
+        })
+    out = {"type": "FeatureCollection", "features": feats,
+           "_method": {"source": "Overpass highway=motorway|trunk|primary|secondary",
+                       "simplified": "rdp per class, 0.0006-0.0018 deg"}}
+    path = os.path.join(OUT_GEO, "khuzestan_roads.geojson")
+    json.dump(out, open(path, "w", encoding="utf-8"), ensure_ascii=False,
+              separators=(",", ":"))
+    print(f"  khuzestan_roads.geojson: {len(feats):,} ways · {pts_in:,} -> "
+          f"{pts_out:,} pts · {os.path.getsize(path)/1024:.0f} KB")
+
+
 # --------------------------------------------------------------------------- #
 # data
 # --------------------------------------------------------------------------- #
@@ -703,6 +756,8 @@ def main() -> int:
     dehestan_fc, _ = export_polygons("khuzestan_dehestan_areas.geojson",
                                   "khuzestan_admin7.json", RDP_DEHESTAN,
                                   dehestan_props)
+
+    export_roads()
 
     meta = {
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

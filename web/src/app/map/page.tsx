@@ -19,13 +19,13 @@ async function LiveMap() {
   return (
     <>
       <header className="mb-3">
-        <div className="rounded-2xl border border-line bg-linear-to-l from-brand/[0.10] via-accent/[0.07] to-transparent px-4 py-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_30px_-16px_rgba(15,23,42,0.25)] sm:px-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h1 className="text-[20px] font-extrabold tracking-tight text-ink sm:text-[23px]">
+        <div className="rounded-2xl border border-line bg-linear-to-l from-brand/[0.10] via-accent/[0.07] to-transparent px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_30px_-16px_rgba(15,23,42,0.25)] sm:px-5">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h1 className="text-[17px] font-extrabold tracking-tight text-ink sm:text-[20px]">
                 نقشهٔ استان خوزستان — سکونتگاه، جمعیت و تراکم داروخانه
               </h1>
-              <p className="mt-1 max-w-3xl text-[12px] leading-5 text-muted">
+              <p className="mt-1 max-w-3xl text-[11.5px] leading-[1.6] text-muted">
                 هر شهر و روستایی که مختصات دارد، با نام شهرستان / بخش / دهستان،
                 جمعیت و تعداد داروخانهٔ ثبت‌شده‌اش. رنگ روی نقشه فقط داخل محدودهٔ
                 مسکونی رسم می‌شود، و فاصلهٔ هر نقطه از اهواز روی یک گراف شبکه‌ای
