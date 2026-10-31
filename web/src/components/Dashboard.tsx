@@ -293,6 +293,12 @@ export function Dashboard({ data }: { data: DashboardData }) {
                   ↻ به‌روزرسانی
                 </Button>
                 <Link
+                  href="/map"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft px-2.5 py-1.5 text-xs font-medium text-accent transition hover:bg-accent/15"
+                >
+                  نقشهٔ خوزستان و فاصله‌ها
+                </Link>
+                <Link
                   href="/places"
                   className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-ink transition hover:bg-brand/15"
                 >

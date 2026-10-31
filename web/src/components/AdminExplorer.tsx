@@ -448,6 +448,12 @@ export function AdminExplorer({ data }: { data: AdminData }) {
           >
             بازگشت به تحلیل موقعیت ←
           </Link>
+          <Link
+            href="/map"
+            className="mr-3 mt-3 inline-block text-[11.5px] font-medium text-accent hover:underline"
+          >
+            نقشهٔ خوزستان و فاصله‌ها ←
+          </Link>
         </Card>
       </div>
     </div>

@@ -731,6 +731,115 @@ python etl/verify_admin.py        # invariants: one open version per area, paren
 
 ---
 
+## Map layer (خوزستان) — settlements, population, pharmacy density and distance from اهواز
+
+`/places` proves the tree exists; it cannot answer *«how far is this village from
+اهواز, and where do I have to go before a site makes sense?»*. The map layer
+answers that and nothing else, from data already in the database:
+
+| Table / view | Grain | Contents |
+|---|---|---|
+| `map_point` | settlement | resolved coordinate, straight line, OSRM road distance when measured, graph distance, ring, graph hops |
+| `map_edge` | undirected pair | the spanning tree the map draws (n−1 edges) |
+| `map_density` | residential grid cell | population + pharmacies within 10 km, density per 10k, gap |
+| `map_import` | one row | parameters, calibration, counts, build time |
+| `v_map_settlement` | settlement | the administrative row + the **live** FDA pharmacy counts + the distances |
+
+Counts and populations are **not copied** into the map layer: `v_map_settlement`
+joins `v_admin_area_current` and the live FDA snapshot, so a new `load.py` or
+`load_admin.py` shows up on the next page load. Only the computed distances and
+the density grid are materialised (a Dijkstra is not a `WHERE` clause).
+
+### Distance from اهواز — three numbers, each labelled
+
+1. **road** — 635 places carry a real OSRM driving distance from the OSM layer.
+2. **network** — Dijkstra from اهواز over a proximity graph of the settlements
+   (5 nearest neighbours each + everything within 10 km, edges capped at 45 km
+   so a straight line across the desert cannot become a "road"), then multiplied
+   by the measured median `road/network` ratio (**1.174** over 635 places).
+3. **straight** — the great-circle fallback, used only for a settlement outside
+   the graph.
+
+`map_point.dist_source` records which one each row is, the UI prints it next to
+the number, and a driving distance *shorter* than the straight line is rejected
+as a name collision in the OSM link (4 cases) instead of being plotted.
+
+### Density only where people live
+
+A ~3.3 km grid is built over the settlement extent and a cell is kept **only if a
+settlement is within 2.5 km**; cells with no population inside the 10 km window
+are dropped as well. Desert, salt flats, the marshes and the Zagros ridges
+therefore have no cell at all — the overlay physically cannot colour empty
+ground. Each kept cell carries population and pharmacies in the window, the
+density (`pharmacies / population × 10 000`) and the gap against the provincial
+baseline (5,408 residents per pharmacy in this dataset).
+
+### Commands
+
+```bash
+python etl/build_map_layer.py --check   # ~5 s: graph, density, polygons, asserts
+node web/scripts/proof-map.mjs          # headless Chrome: screenshots + interaction assertions
+```
+
+It writes `web/public/geo/khuzestan_bakhsh_areas.geojson` (67 filled بخش
+polygons with label anchors), `khuzestan_dehestan_areas.geojson` (188 دهستان
+outlines) and `khuzestan_outline.geojson` (the province silhouette, computed as
+the edge-parity union of the بخش polygons — internal borders appear twice and
+cancel). The polygons are stitched from the raw Overpass relations, which arrive
+as unordered member ways: `etl/khuzestan_bakhsh.geojson` is a LineString soup
+because the atlas only strokes it, and a filled map needs closed rings.
+
+### App
+
+**`/map`** (linked from the dashboard header). SVG only — no tile server, no map
+library, so it works offline and every pixel is accounted for:
+
+* dots are شهر/روستا, sized by population, haloed when the FDA feed lists a pharmacy;
+* the density overlay has two modes — تراکم (pharmacies per 10k) and شکاف
+  (population ÷ target − pharmacies);
+* the spanning tree can be drawn, so the network distance is traceable, not a number;
+* a radius dial from 10 to 300 km, ring ladder (0–25 … 300+), search over
+  name/شهرستان/بخش/دهستان, and a candidate table sorted by distance or by gap;
+* the detail panel prints the full path (استان › شهرستان › بخش › دهستان), the
+  population with year and source, pharmacy counts, persons-per-pharmacy, the gap
+  against an adjustable target, and all three distances with their provenance;
+* the province outline, the بخش fills and the density grid are clipped to the
+  province; labels are greedy-decluttered against each other and counter-scaled
+  so they keep a constant screen size while zooming.
+
+### Verification performed
+
+`python etl/build_map_layer.py --check` asserts, in one run: 3,677 plotted rows,
+>200 density cells, no cell without population, no cell outside 29–33.5°N /
+46.5–51.5°E, every distance ≥ its straight line, exactly one zero distance
+(اهواز), the pharmacy sum equals `v_map_pharmacy`, 67 بخش polygons, >170 دهستان
+polygons and a province area between 55,000 and 75,000 km².
+
+`node web/scripts/proof-map.mjs` drives real Chrome and reports the DOM back:
+3,685 circles, 2,742 density cells, 68 filled paths, 30 labels with **0
+overlapping bounding boxes**, 408 table rows, no horizontal overflow; then it
+hovers a dot (tooltip shows اهواز · ۳۴۱ داروخانه · ۰ کیلومتر), clicks it (detail
+panel opens with the same figures), clicks a ring row (radius 300 km, table
+re-scoped), toggles the layers (3,676 network lines appear, 0 admin paths when
+off), zooms (transform `scale(1)` → `scale(2.25)`, labels 30 → 79) and searches
+(rows 408 → 226). `next build` compiles the route as a partial prerender.
+
+### Known limits
+
+* **1,828 of 5,505 settlements have no coordinate** and are not plotted — they are
+  counted and reported, never placed at a guessed position. Most are villages
+  whose Wikipedia article carries no `P625`.
+* The graph distance is a **lower bound of the road**; the calibration makes it an
+  estimate, not a measurement. Where accuracy matters, use the 635 measured rows.
+* Pharmacy counts are the live FDA snapshot: `0` means *not in the feed*, which is
+  not the same as *no pharmacy there* (the yearbook counts a few more per county).
+* The مساحت figures in the polygon files are planar approximations at Khuzestan's
+  latitude, used only to drop slivers and to sanity-check the outline.
+* 31 شهرستان exist in the administrative tree; one of them (ابوالعباس) has no
+  settlement row with a coordinate yet, so its ground shows no dots.
+
+---
+
 ## UI conventions
 
 Persian (RTL) throughout. **Persian digits with the Arabic thousands separator `٬`

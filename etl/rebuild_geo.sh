@@ -13,6 +13,8 @@
 #   enrich_place_dehestan.py  دهستان (admin_level=7) onto every place
 #   build_geo_density.py    residential-masked pharmacy density surface
 #   build_geo_pages.py      the self-contained atlas HTML
+#   build_map_layer.py      the /map layer: distances from اهواز, residential
+#                           density grid, filled بخش/دهستان polygons
 #   audit_geo.py            the checks that decide whether to trust the numbers
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -26,6 +28,7 @@ python etl/export_geo_map.py
 python etl/enrich_place_dehestan.py
 python etl/build_geo_density.py
 python etl/build_geo_pages.py
+python etl/build_map_layer.py --check
 python etl/report_geo.py
 python etl/audit_geo.py --top=30
 echo
