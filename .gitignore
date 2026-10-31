@@ -1,0 +1,30 @@
+# deps / build
+node_modules/
+.next/
+__pycache__/
+*.pyc
+
+# databases (rebuild with: bash etl/rebuild.sh)
+db/*.sqlite
+db/*.sqlite-wal
+db/*.sqlite-shm
+data/pharmacy.sqlite
+
+# raw + derived data (large; regenerate with the fetchers in etl/ and src/)
+data/raw/
+data/reference/
+data/derived/
+data/inbound/
+
+# binaries / screenshots
+reports/screenshots/
+reports/khuzestan-atlas*.html
+tools/shots/
+web/shots/
+
+# local backups
+*.bak-*
+*.bak-preupgrade
+
+# bundled 7-Zip binary (third-party)
+tools/7z/

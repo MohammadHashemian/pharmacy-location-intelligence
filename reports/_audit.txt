@@ -1,0 +1,107 @@
+==============================================================================
+1. NEW PLACES vs THE CLOSEST FDA NAME ANYWHERE (county constraint OFF)
+==============================================================================
+places called new (city/town/village): 275
+
+  عین دو                   شهرستان اهواز        pop=  18,000     7.0km  closest FDA=روستای یزدنو           (شهرستان هویزه)  sim=0.67
+  حر ریاحی                 شهرستان شوش          pop=   9,177    95.4km  closest FDA=روستای حریه            (شهرستان بندرماهش)  sim=0.73
+  شهرک سلمان فارسی         شهرستان شوش          pop=   6,502   104.9km  closest FDA=روستای هارکله مناری    (شهرستان لالی)  sim=0.72
+  مویلحه هواشم             شهرستان باوی         pop=   5,722    25.6km  closest FDA=روستای مویلحه علیا     (شهرستان رامشیر)  sim=0.70
+  جندی شاپور               شهرستان دزفول        pop=   5,298   110.6km  closest FDA=روستای سدشاوور         (شهرستان شوش)  sim=0.62
+  خیط الرواس               شهرستان باوی         pop=   2,694    13.8km  closest FDA=روستای خیطعماره        (شهرستان امیدیه)  sim=0.62
+  شهرک منتظری              شهرستان شادگان       pop=   2,133    74.4km  closest FDA=روستای شهرک مطهری      (شهرستان بهبهان)  sim=0.84
+  ندافیه                   شهرستان باوی         pop=   2,065    37.6km  closest FDA=روستای عنایه           (شهرستان شوشتر)  sim=0.80
+  مالکیه علیا              شهرستان دشت آزادگان  pop=   2,031    53.8km  closest FDA=روستای مالکیه سفلی     (شهرستان دشت ازاد)  sim=0.84
+  کیمه                     شهرستان رامهرمز      pop=   1,666    88.6km  closest FDA=روستای کویمه           (شهرستان بندرماهش)  sim=0.89  <-- REVIEW
+  ابوناگه                  شهرستان کارون        pop=   1,450    20.4km  closest FDA=روستای اب انارک        (شهرستان باغ ملک)  sim=0.71
+  ظلم آباد                 شهرستان گتوند        pop=   1,417    94.1km  closest FDA=روستای خزعل اباد       (شهرستان ابادان)  sim=0.86
+  زرگان ابوفاضل            شهرستان باوی         pop=   1,265    22.0km  closest FDA=روستای ابوفاضل         (شهرستان باوی)  sim=0.74
+  بنه سهراب                شهرستان رامهرمز      pop=   1,208    87.8km  closest FDA=روستای بنه اب          (شهرستان اندیکا)  sim=0.77
+  کوی طالقانی              شهرستان هفتگل        pop=   1,183    81.6km  closest FDA=روستای شهرک طالقانی    (شهرستان ایذه)  sim=0.76
+  شهرک بنوار ناظر (اسلام آ شهرستان اندیمشک      pop=   1,169   126.6km  closest FDA=روستای شهرک اسلام اباد (شهرستان اندیمشک)  sim=0.74
+  مالکیه غربی              شهرستان دشت آزادگان  pop=   1,009    54.1km  closest FDA=روستای ماشگیری         (شهرستان اندیکا)  sim=0.71
+  شهرک زراعی شمس آباد      شهرستان دزفول        pop=     970   110.3km  closest FDA=روستای شهرک شمس اباد   (شهرستان دزفول)  sim=0.85
+  جبار عبدالامام           شهرستان خرمشهر       pop=     948   115.1km  closest FDA=ام الامامید            (شهرستان رامهرمز)  sim=0.64
+  طراح یک                  شهرستان حمیدیه       pop=     825    29.0km  closest FDA=روستای رامسه یک        (شهرستان حمیدیه)  sim=0.77
+  کوی شاه غالب             شهرستان بهبهان       pop=     809   156.4km  closest FDA=کول شاه                (شهرستان اندیمشک)  sim=0.62
+  دربه غریبی               شهرستان ایذه         pop=     787   154.0km  closest FDA=روستای درب غریبی ها    (شهرستان ایذه)  sim=0.84
+  پاگچی مرکزی              شهرستان رامهرمز      pop=     749    89.4km  closest FDA=پاگچی بهمیی            (شهرستان رامهرمز)  sim=0.70
+  اعلاڈ                    شهرستان صیدون        pop=     666   136.3km  closest FDA=روستای اعلاء           (شهرستان باغ ملک)  sim=0.75
+  فرع زایر                 شهرستان شادگان       pop=     657    72.6km  closest FDA=روستای فرغ زایر        (شهرستان شادگان)  sim=0.92  <-- REVIEW
+
+  of the top 25: 2 have a name ≥0.86 similar somewhere in the FDA feed
+
+==============================================================================
+2. THE VARIANT QUEUE (similar name, same county, not confirmed)
+==============================================================================
+  map شاوور                  village  شهرستان کرخه       ~ FDA شهر شاوور              pop=  8,833 ph=  1 score=0.55
+  map صیدون                  town     شهرستان صیدون      ~ FDA شهر صیدون              pop=  7,650 ph=  2 score=0.55
+  map الوان                  town     شهرستان کرخه       ~ FDA شهر الوان              pop=  6,860 ph=  4 score=0.55
+  map آوان                   village  شهرستان شوش        ~ FDA شهر الوان              pop=  6,860 ph=  4 score=0.55
+  map گاومیش آباد            neighbourhood شهرستان کارون      ~ FDA گاومیش اباد            pop=  5,722 ph=  0 score=0.55
+  map خویس                   village  شهرستان کرخه       ~ FDA روستای خویس            pop=  3,520 ph=  0 score=0.55
+  map میداوود                town     شهرستان باغملک     ~ FDA شهر میداود             pop=  3,513 ph=  2 score=0.61
+  map سیدعباس                village  شهرستان کرخه       ~ FDA روستای سیدعباس         pop=  3,500 ph=  0 score=0.55
+  map دهکده                  hamlet   شهرستان امیدیه     ~ FDA روستای دهکده           pop=  2,951 ph=  0 score=0.55
+  map دهکده                  hamlet   شهرستان بهبهان     ~ FDA روستای دهکده           pop=  2,951 ph=  0 score=0.55
+  map فیاضی                  village  شهرستان خرمشهر     ~ FDA روستای فیاضی           pop=  2,253 ph=  0 score=0.55
+  map صالح داود              village  شهرستان شوش        ~ FDA روستای صالح داوود      pop=  2,132 ph=  0 score=0.64
+  map الجزایر                village  شهرستان کرخه       ~ FDA روستای الجزایر         pop=  2,036 ph=  0 score=0.55
+  map ذخیره اسماعیل غانم     village  شهرستان کرخه       ~ FDA روستای ذخیره اسماعیل غ pop=  1,891 ph=  0 score=0.55
+  map بنه لم                 village  شهرستان صیدون      ~ FDA روستای بنه لم          pop=  1,539 ph=  0 score=0.55
+  map رمله علیا              hamlet   شهرستان رامشیر     ~ FDA روستای رمیله علیا      pop=  1,415 ph=  0 score=0.64
+  map سن بهادل               village  شهرستان کرخه       ~ FDA روستای سن بهادل        pop=  1,409 ph=  0 score=0.55
+  map سدشاوور                village  شهرستان کرخه       ~ FDA روستای سدشاوور         pop=  1,295 ph=  1 score=0.55
+  map بيت داوود              village  شهرستان شادگان     ~ FDA روستای بیت داود        pop=  1,269 ph=  0 score=0.63
+  map زهره                   village  شهرستان بهبهان     ~ FDA شهر زهره               pop=  1,192 ph=  0 score=0.55
+  map سیدرحیمه               village  شهرستان کرخه       ~ FDA روستای سیدرحیمه        pop=  1,138 ph=  0 score=0.55
+  map سید خلف                village  شهرستان کرخه       ~ FDA روستای سیدخلف          pop=  1,134 ph=  0 score=0.50
+  map سید خلف                hamlet   شهرستان اهواز      ~ FDA روستای سیدخلف          pop=  1,134 ph=  0 score=0.50
+  map شلحه حاج حسین          village  شهرستان آبادان     ~ FDA روستای شلحه حاجی حسین  pop=  1,105 ph=  0 score=0.67
+  map شاولی                  village  شهرستان شادگان     ~ FDA روستای شاه ولی         pop=  1,103 ph=  0 score=0.59
+
+==============================================================================
+3. COUNTY: the two independent routes, and the rows they disagree on
+==============================================================================
+    3  own Wikidata P131: شهرستان بندرماهشهر         vs بakhsh polygon: شهرستان ماهشهر
+    1  own Wikidata P131: شهرستان باغ ملک            vs بakhsh polygon: شهرستان باغملک
+    1  own Wikidata P131: شهرستان باغ ملک            vs بakhsh polygon: شهرستان رامهرمز
+    1  own Wikidata P131: شهرستان باغملک             vs بakhsh polygon: شهرستان باغ ملک
+    1  own Wikidata P131: شهرستان شادگان             vs بakhsh polygon: شهرستان رامشیر
+    1  own Wikidata P131: شهرستان هفتکل)             vs بakhsh polygon: شهرستان هفتگل
+    1  own Wikidata P131: شهرستان هفتگل              vs بakhsh polygon: شهرستان هفتکل
+
+==============================================================================
+4. SPOT CHECKS
+==============================================================================
+  اهواز          matched  شهرستان اهواز        fda=شهر اهواز             1.0km gc   1.46 km road  pop=1,184,788
+  دزفول          matched  شهرستان دزفول        fda=شهر دزفول           120.3km gc 146.09 km road  pop=264,709
+  آبادان         matched  شهرستان آبادان       fda=شهر ابادان          113.4km gc 120.24 km road  pop=231,476
+  خرمشهر         matched  شهرستان خرمشهر       fda=شهر خرمشهر          109.2km gc 129.56 km road  pop=133,097
+  ملاشیه یک      matched  شهرستان اهواز        fda=روستای ملاشیه        10.1km gc  13.21 km road  pop=16,575
+  هفتکل          matched  شهرستان هفتگل        fda=شهر هفتگل            82.8km gc 101.71 km road  pop=15,802
+  بهبهان         matched  شهرستان بهبهان       fda=شهر بهبهان          170.4km gc  201.5 km road  pop=122,604
+  شادگان         matched  شهرستان شادگان       fda=شهر شادگان           74.6km gc  99.14 km road  pop=41,733
+  ایذه           matched  شهرستان ایذه         fda=شهر ایذه            127.9km gc 183.33 km road  pop=119,399
+  گتوند          matched  شهرستان گتوند        fda=شهر گتوند           103.7km gc 124.95 km road  pop=24,216
+
+==============================================================================
+5. STATUS SUMMARY
+==============================================================================
+  matched   1649  (urban  84, suspect population  2)
+  new        667  (urban   8, suspect population  0)
+  variant    162  (urban   4, suspect population  0)
+
+  osm_places_raw                  2,724  elements returned by Overpass that carry a name and coordinates
+  osm_places_deduped              2,478  after collapsing node/boundary twins
+  osm_places_matched_to_fda       1,649  name agreement + شهرستان agreement
+  osm_places_name_variants          162  similar name, same county — probably the same place, not confirmed
+  osm_places_not_in_fda             667  candidate new locations
+  fda_places_not_on_map           1,543  FDA rows with no OSM twin
+  fda_places_total                3,150  FDA places in خوزستان
+  bakhsh_with_county                 67  بakhsh polygons with a resolved شهرستان
+  bakhsh_total                       67  admin_level=6 relations
+  places_without_county               0  left NULL rather than guessed
+  county_sources_disagree             9  place's own Wikidata P131 vs its بakhsh polygon
+  places_outside_any_bakhsh           0  assigned from the nearest polygon instead
+  road_distance_resolved            950  OSRM driving distance and time from اهواز

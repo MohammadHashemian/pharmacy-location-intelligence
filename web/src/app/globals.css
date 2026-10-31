@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Tailwind 4 turns each --color-* into bg-/text-/border- utils.
+   --------------------------------------------------------------------------- */
+@theme {
+  --color-bg: #f1f5f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #f8fafc;
+  --color-ink: #0f172a;
+  --color-ink-soft: #334155;
+  --color-muted: #64748b;
+  --color-faint: #94a3b8;
+  --color-line: #e2e8f0;
+  --color-line-strong: #cbd5e1;
+
+  --color-brand: #0d9488;
+  --color-brand-ink: #0f766e;
+  --color-brand-soft: #ccfbf1;
+  --color-accent: #6366f1;
+  --color-accent-soft: #e0e7ff;
+
+  --color-good: #059669;
+  --color-good-soft: #d1fae5;
+  --color-warn: #d97706;
+  --color-warn-soft: #fef3c7;
+  --color-danger: #e11d48;
+  --color-danger-soft: #ffe4e6;
+
+  --font-sans:
+    var(--font-vazir), "Segoe UI", Tahoma, ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 100% -10%, #e0f2f1 0%, transparent 55%),
+    radial-gradient(900px 500px at 0% 0%, #eef2ff 0%, transparent 50%),
+    var(--color-bg);
+  background-attachment: fixed;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* Numbers must not shift width while sorting/rescoring. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--color-line-strong);
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 9999px;
+  background: var(--color-brand);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgb(15 23 42 / 0.3);
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border: 2px solid #fff;
+  border-radius: 9999px;
+  background: var(--color-brand);
+  cursor: pointer;
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
