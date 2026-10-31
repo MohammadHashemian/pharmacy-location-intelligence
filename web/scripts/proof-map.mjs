@@ -262,7 +262,7 @@ const search = await evaluate(`(() => {
   if (!input) return { ok: false };
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
   const before = document.querySelectorAll("tbody tr").length;
-  setter.call(input, "اهواز");
+  setter.call(input, "امالطمیر");
   input.dispatchEvent(new Event("input", { bubbles: true }));
   return { ok: true, before };
 })()`);

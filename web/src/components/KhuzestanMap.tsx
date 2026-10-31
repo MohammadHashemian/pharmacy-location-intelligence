@@ -249,6 +249,13 @@ function sourceFa(s: string | null | undefined): string {
   }
 }
 
+/** Fold ZWNJ, spacing and Arabic letter variants so «امالطمیر» finds «ام الطمیر». */
+const fold = (v: string): string =>
+  v
+    .replace(/[‌‍‎‏\s]/g, "")
+    .replace(/ي/g, "ی")
+    .replace(/ك/g, "ک");
+
 const strip = (v: string, prefix: string) =>
   v.startsWith(prefix) ? v.slice(prefix.length).trim() : v;
 
@@ -305,20 +312,31 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     return flags;
   }, [settlements, radius]);
 
+  /** Pre-folded search keys, one per settlement: folding 3.6k names per
+      keystroke would be wasteful, and the arrays never change. */
+  const folded = useMemo(() => {
+    const f = (v: string | null) => fold(v ?? "");
+    return {
+      name: settlements.map((s) => f(s.name)),
+      county: settlements.map((s) => f(s.county)),
+      bakhsh: settlements.map((s) => f(s.bakhsh)),
+      dehestan: settlements.map((s) => f(s.dehestan)),
+    };
+  }, [settlements]);
+
   const candidates = useMemo(() => {
-    const q = query.trim();
+    const q = fold(query);
     const out: MapSettlement[] = [];
-    for (const s of settlements) {
+    for (let i = 0; i < settlements.length; i++) {
+      const s = settlements[i];
       if (s.dist > radius) continue;
       if ((s.pop ?? 0) < minPop) continue;
       const gap = (s.pop ?? 0) / targetPerPharm - s.ph;
       if (onlyGap && gap < 1) continue;
       if (q) {
         const hit =
-          s.name.includes(q) ||
-          (s.county ?? "").includes(q) ||
-          (s.bakhsh ?? "").includes(q) ||
-          (s.dehestan ?? "").includes(q);
+          folded.name[i].includes(q) || folded.county[i].includes(q) ||
+          folded.bakhsh[i].includes(q) || folded.dehestan[i].includes(q);
         if (!hit) continue;
       }
       out.push(s);
@@ -331,21 +349,24 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         : (a, b) => a.dist - b.dist,
     );
     return out;
-  }, [settlements, radius, minPop, onlyGap, query, sortBy, targetPerPharm]);
+  }, [settlements, folded, radius, minPop, onlyGap, query, sortBy, targetPerPharm]);
 
   const searchHits = useMemo(() => {
-    const q = query.trim();
+    const q = fold(query);
     if (q.length < 2) return [];
-    return settlements
-      .filter(
-        (s) =>
-          s.name.includes(q) ||
-          (s.county ?? "").includes(q) ||
-          (s.bakhsh ?? "").includes(q) ||
-          (s.dehestan ?? "").includes(q),
-      )
-      .slice(0, 8);
-  }, [settlements, query]);
+    const out: MapSettlement[] = [];
+    for (let i = 0; i < settlements.length && out.length < 8; i++) {
+      if (
+        folded.name[i].includes(q) ||
+        folded.county[i].includes(q) ||
+        folded.bakhsh[i].includes(q) ||
+        folded.dehestan[i].includes(q)
+      ) {
+        out.push(settlements[i]);
+      }
+    }
+    return out;
+  }, [settlements, folded, query]);
 
   const stats = useMemo(() => {
     let pop = 0;
