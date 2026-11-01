@@ -757,12 +757,28 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     };
   }, [isFull, commit]);
 
-  const onWheel = (e: ReactWheelEvent<SVGSVGElement>) => {
-    const [mx, my] = viewBoxPoint(e.clientX, e.clientY);
-    const v = viewRef.current;
-    const k = Math.max(1, Math.min(MAX_ZOOM, v.k * Math.exp(-e.deltaY * 0.0016)));
-    commit(k, mx - (mx - v.tx) * (k / v.k), my - (my - v.ty) * (k / v.k));
-  };
+  /* Wheel over the map zooms the map and must not scroll the page. React attaches
+     `onWheel` as a passive listener at the root, so `preventDefault()` there is
+     ignored by the browser — the listener has to be native and non-passive. */
+  const wheelRef = useRef<(e: WheelEvent) => void>(() => {});
+  useEffect(() => {
+    wheelRef.current = (e: WheelEvent) => {
+      const [mx, my] = viewBoxPoint(e.clientX, e.clientY);
+      const v = viewRef.current;
+      const k = Math.max(1, Math.min(MAX_ZOOM, v.k * Math.exp(-e.deltaY * 0.0016)));
+      commit(k, mx - (mx - v.tx) * (k / v.k), my - (my - v.ty) * (k / v.k));
+    };
+  });
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      wheelRef.current(e);
+    };
+    svg.addEventListener("wheel", handler, { passive: false });
+    return () => svg.removeEventListener("wheel", handler);
+  }, []);
 
   const toScene = (clientX: number, clientY: number): [number, number, number] => {
     const [px, py, scale] = viewBoxPoint(clientX, clientY);
@@ -1543,7 +1559,6 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               touchAction: "none",
             }}
             className="block cursor-crosshair rounded-xl border border-line bg-[#f8fafc]"
-            onWheel={onWheel}
             onPointerMove={onPointerMove}
             onPointerLeave={() => {
               drag.current = null;
