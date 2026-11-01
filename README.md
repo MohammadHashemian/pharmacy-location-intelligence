@@ -328,6 +328,27 @@ and never double-counted:
 Every settlement tooltip/card shows the split — جمعیت, داروخانه (FDA), نقشهشده,
 بدون موقعیت — and the header chip reads «۸۹۴ داروخانه در فید سازمان · ۴۱۹ روی نقشه».
 
+### Secrets: what is in the repo, and the check that keeps it that way
+
+Keys live **only** in `db/pharmacy.sqlite` (`app_setting`), which is git-ignored, and the
+database is never read by the browser — `/api/settings` returns a masked tail.
+
+```bash
+python etl/verify_no_secrets.py            # full audit, exit 1 on any finding
+python etl/verify_no_secrets.py --quiet    # gate a push
+```
+
+Six assertions, each one a mistake somebody has actually made: credential shapes in
+**every** commit; the exact stored values (a regex can miss a key format, an exact
+search cannot); `db/*.sqlite`, `data/raw`, `data/derived`, `.env` never added; the
+ignore rules still present; `/api/settings` returning only «••••••••last4»; and no key
+material in `web/.next/static`, which is public by definition.
+
+Audited at 34 commits: no key in history, none in the bundle, 0 vulnerabilities in the
+production dependency tree. Two things worth knowing rather than fixing: the commit
+author email is public (`mohammadhashemian@…`), and no API route authenticates — fine
+for a local tool, not fine if this is ever deployed publicly.
+
 ### Judging the hard tail with a model (`etl/classify_with_llm.py`)
 
 The rules settle what the name says. They cannot settle `Dr. Sadeghi`, `بگا`,

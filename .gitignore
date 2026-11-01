@@ -4,6 +4,12 @@ node_modules/
 __pycache__/
 *.pyc
 
+# secrets
+.env
+.env.*
+*.env
+!.env.example
+
 # databases (rebuild with: bash etl/rebuild.sh)
 db/*.sqlite
 db/*.sqlite-wal
