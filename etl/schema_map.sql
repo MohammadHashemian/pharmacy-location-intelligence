@@ -123,6 +123,9 @@ CREATE TABLE IF NOT EXISTS map_pharmacy (
   nearest_km      REAL,
   county          TEXT,
   street          TEXT,
+  -- where the point came from: osm | neshan | google. A rebuild only replaces
+  -- the OSM rows, so an imported provider's points survive it.
+  source          TEXT NOT NULL DEFAULT 'osm',
   PRIMARY KEY (osm_type, osm_id)
 );
 CREATE INDEX IF NOT EXISTS ix_map_pharmacy_area ON map_pharmacy (nearest_area_id);

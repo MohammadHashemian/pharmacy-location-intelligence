@@ -144,11 +144,12 @@ function buildScene(data: MapData): Scene {
   const shapesOf = (list: MapShape[], kind: "bakhsh" | "dehestan"): AdminShape[] =>
     list.map((s) => {
       const [lx, ly] = proj(s.label[0], s.label[1]);
-      /* A name is not a key: «بخش مرکزی» exists in several شهرستان‌ها (67 بخش,
-         one named مرکزی per county) and 14 دهستان names span more than one
-         county. Keying on the name alone made React drop labels. */
+      /* Identity comes from the source shape, never from the name: «بخش مرکزی»
+         exists in every شهرستان, its `county` is unresolved in that capture, and
+         14 دهستان names span more than one county. Name/county-keyed children
+         were being dropped with a React duplicate-key warning. */
       return {
-        key: `${kind}:${s.county ?? ""}:${s.name}`,
+        key: `${kind}:${s.id}`,
         d: path(s),
         name: s.name,
         county: s.county,
@@ -1402,7 +1403,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             >
               <div className="flex items-baseline justify-between gap-1">
                 <b className="text-[12px] text-ink">{data.pharmacies[hoverPharm.i].name}</b>
-                <span className="rounded bg-warn-soft px-1 text-[9px] text-warn">OSM</span>
+                <span className="rounded bg-warn-soft px-1 text-[9px] text-warn">
+                  {data.pharmacies[hoverPharm.i].source === "osm"
+                    ? "OSM"
+                    : data.pharmacies[hoverPharm.i].source === "neshan"
+                      ? "نشان"
+                      : data.pharmacies[hoverPharm.i].source}
+                </span>
               </div>
               <div className="text-[10.5px] text-muted">
                 {data.pharmacies[hoverPharm.i].settlement ?? "—"}

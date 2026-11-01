@@ -67,6 +67,8 @@ export type MapCell = {
 };
 
 export type MapShape = {
+  /** Stable identity: OSM id, or name+label when the capture has no id. */
+  id: string;
   name: string;
   county: string | null;
   bakhsh: string | null;
@@ -80,6 +82,8 @@ export type MapShape = {
 /** One pharmacy somebody mapped on the ground (OSM `amenity=pharmacy`). */
 export type MapPharmacy = {
   id: string;
+  /** osm | neshan | google — which provider the point came from. */
+  source: string;
   name: string;
   nameEn: string | null;
   lat: number;
@@ -141,6 +145,7 @@ export type MapData = {
 
 type GeoFeature = {
   properties: {
+    osm_id?: number | string;
     name: string;
     county?: string | null;
     bakhsh?: string | null;
@@ -169,6 +174,13 @@ function readShapes(file: string): MapShape[] {
   const full = path.join(process.cwd(), "public", "geo", file);
   const fc = JSON.parse(fs.readFileSync(full, "utf-8")) as { features: GeoFeature[] };
   return fc.features.map((f) => ({
+    // Names repeat («بخش مرکزی» exists once per شهرستان), so the OSM id is the
+    // identity; the coordinate fallback keeps a shape addressable even in a
+    // capture that predates the id column.
+    id: String(
+      f.properties.osm_id ??
+        `${f.properties.name}@${f.properties.label_lat},${f.properties.label_lon}`,
+    ),
     name: f.properties.name,
     county: f.properties.county ?? null,
     bakhsh: f.properties.bakhsh ?? null,
@@ -294,6 +306,7 @@ export function loadMapData(): MapData {
   const pharmacies: MapPharmacy[] = all<{
     osm_type: string;
     osm_id: number;
+    source: string;
     name: string | null;
     name_en: string | null;
     lat: number;
@@ -302,13 +315,14 @@ export function loadMapData(): MapData {
     settlement: string | null;
     county: string | null;
   }>(`
-    SELECT p.osm_type, p.osm_id, p.name, p.name_en, p.lat, p.lon, p.nearest_km,
-           a.name AS settlement, p.county
+    SELECT p.osm_type, p.osm_id, p.source, p.name, p.name_en, p.lat, p.lon,
+           p.nearest_km, a.name AS settlement, p.county
     FROM map_pharmacy p
     LEFT JOIN admin_area a ON a.id = p.nearest_area_id
     ORDER BY p.osm_type, p.osm_id
   `).map((p) => ({
     id: `${p.osm_type}/${p.osm_id}`,
+    source: p.source ?? p.osm_type,
     name: p.name ?? "داروخانه (بینام)",
     nameEn: p.name_en,
     lat: Math.round(p.lat * 1e4) / 1e4,

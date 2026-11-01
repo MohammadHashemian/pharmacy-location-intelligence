@@ -59,6 +59,12 @@ async function LiveMap() {
                   ← داشبورد رتبه‌بندی
                 </Link>
                 <Link
+                  href="/settings"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-xs font-medium text-ink-soft transition hover:border-brand hover:text-brand-ink"
+                >
+                  تنظیمات و کلیدها
+                </Link>
+                <Link
                   href="/places"
                   className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-ink transition hover:bg-brand/15"
                 >

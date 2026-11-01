@@ -672,12 +672,12 @@ def write_db(c: sqlite3.Connection, pts: list[dict], graph: dict,
     c.execute("DELETE FROM map_point")
     c.execute("DELETE FROM map_edge")
     c.execute("DELETE FROM map_density")
-    c.execute("DELETE FROM map_pharmacy")
+    c.execute("DELETE FROM map_pharmacy WHERE source = 'osm'")
     c.execute("DELETE FROM map_import")
     c.executemany("""
         INSERT OR REPLACE INTO map_pharmacy (osm_type, osm_id, name, name_en, lat,
-              lon, nearest_area_id, nearest_km, county, street)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
+              lon, nearest_area_id, nearest_km, county, street, source)
+        VALUES (?,?,?,?,?,?,?,?,?,?, 'osm')
     """, pharmacies)
     c.executemany("""
         INSERT INTO map_point (area_id, lat, lon, coord_source, straight_km,
@@ -715,6 +715,11 @@ def main() -> int:
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys = ON")
     c.executescript(open(SCHEMA, encoding="utf-8").read())
+    # additive migration: an older map_pharmacy predates the provider column
+    cols = {r[1] for r in c.execute("PRAGMA table_info(map_pharmacy)")}
+    if "source" not in cols:
+        c.execute("ALTER TABLE map_pharmacy ADD COLUMN source TEXT NOT NULL DEFAULT 'osm'")
+        c.commit()
 
     rows, ref = load_settlements(c)
     ref_lat, ref_lon = ref["latitude"], ref["longitude"]

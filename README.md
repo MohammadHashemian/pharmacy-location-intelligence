@@ -611,6 +611,37 @@ python etl/verify_geo_page.py    # drives the atlas in headless Chromium and mea
   5,437 vertices (from 43,282) at ~150 m tolerance; the tolerance is recorded in
   the file so the map is never mistaken for the raw capture.
 
+### The atlas's three added layers
+
+The app at `/map` is the interactive product; the atlas is the single file you can
+open from disk with no server. Both answer the same question, and the atlas gained
+the three pieces the app gets from its own layer:
+
+* **دهستان on every place** — `etl/enrich_place_dehestan.py` casts the same
+  even-odd ray over the 188 `admin_level=7` relations of the raw Overpass capture
+  and writes `dehestan` + `dehestan_method` into `khuzestan_places.geojson`:
+  **2,478 of 2,478 places** assigned, 2,362 inside exactly one polygon, 115 inside
+  two (resolved to the smallest area, never silently picked), 1 outside all. Every
+  popup now prints استان › شهرستان › بخش › دهستان › روستا.
+* **density where people live** — `etl/build_geo_density.py`: a 3.3 km grid kept
+  only where a settlement is within 2.5 km, each kept cell carrying population and
+  pharmacies within 10 km, density per 10,000 and the gap against the provincial
+  basis (**4,768 residents per pharmacy**). 2,083 cells; desert, marsh and ridge
+  have none, so the overlay cannot colour empty ground. The two `pop_outlier`
+  places (دُب حردان 1M, کوله جاز 450k) are zeroed first — left in, they swallowed
+  the whole province inside one 10 km window and faked a "159-pharmacy gap" beside
+  اهواز.
+* **expansion search from اهواز** — the «گسترش از اهواز» tab: a network-distance
+  radius dial, a population floor, and a table sorted by network distance (or by
+  gap) with a «نقشه» button that jumps to the place. Network distance is Dijkstra
+  from اهواز over a proximity graph (5 nearest neighbours + everything within
+  10 km), **0.85× the real OSRM road distance** on the 510 places that carry both —
+  so it understates the drive, and the tab says so. 1,835 of 1,855 nodes are
+  reachable; the rest print «—» rather than a guess.
+
+Both new steps sit in `etl/rebuild_geo.sh` after `export_geo_map.py`, because the
+export rewrites the GeoJSON and the دهستان assignment must be re-applied to it.
+
 ### Verification performed
 
 * `etl/audit_geo.py` searches the **whole** FDA list for a name close to every
@@ -890,6 +921,31 @@ this fixed: the portrait SVG's intrinsic width widened a 390 px viewport to
 `min-w-0` on the grid children. Labels are sized in CSS pixels (measured from a
 `ResizeObserver`) rather than viewBox units, so they stay legible on a phone, and
 their collision boxes follow the text baseline instead of the anchor point.
+
+### API keys — `/settings`
+
+The optional POI providers need a key, and a key is a secret: it is entered in the
+app at **`/settings`**, stored in `db/pharmacy.sqlite` (`app_setting`), read only
+by the server, and **never sent to the browser** — the page receives a masked tail
+(«••••••••7890») and nothing else. `تست کلید` calls the provider from the server
+(«داروخانه» within 5 km of اهواز) so a wrong key fails there, with the provider's
+own message, instead of silently at import time.
+
+| | |
+|---|---|
+| `app_setting` | `key`, `value`, `updated_at` — the only table the app writes besides `manual_override` |
+| `/api/settings` | GET status (masked) · POST save/clear |
+| `/api/settings/test` | live check against نشان `/v1/search` or Google `places:searchNearby` |
+| `etl/import_pharmacies.py` | reads the stored نشان key, searches «داروخانه» per city, writes `map_pharmacy` with `source='neshan'` |
+
+An import survives `build_map_layer.py`, which only replaces `source='osm'` rows.
+Two things to know: the key lives in the database, so deleting/rebuilding
+`db/pharmacy.sqlite` deletes it (re-enter it at `/settings`), and it is stored in
+plain text — the file is gitignored, but it is not encrypted at rest.
+
+نشان's search endpoint is `/v1/search`; `/v4/search` returns 404 and an invalid key
+returns **480** (`API Key not found or is not valid`), both handled by the test
+endpoint.
 
 ### Known limits
 

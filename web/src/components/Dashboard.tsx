@@ -293,6 +293,12 @@ export function Dashboard({ data }: { data: DashboardData }) {
                   ↻ به‌روزرسانی
                 </Button>
                 <Link
+                  href="/settings"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-xs font-medium text-ink-soft transition hover:border-brand hover:text-brand-ink"
+                >
+                  تنظیمات
+                </Link>
+                <Link
                   href="/map"
                   className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft px-2.5 py-1.5 text-xs font-medium text-accent transition hover:bg-accent/15"
                 >
