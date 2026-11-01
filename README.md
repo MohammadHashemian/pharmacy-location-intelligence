@@ -371,6 +371,20 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Roads between towns (`etl/build_connectors.py`)
+
+`fetch_province_streets.py` keeps only what lies inside each city's disc, so a town's own
+lanes were there but the tertiary road leaving it was not — ویس had 287 ways inside 6 km
+and read as stranded. The province roads file carries motorway…secondary only.
+
+`build_connectors.py` writes every tertiary / unclassified / living_street way in the
+province into one 3.9 MB file (19,693 ways, simplified to ~20 m) and the map draws it from
+**1.4×**, under the city streets. Measured in ویس at 12×: 287 town streets + **310
+connector ways**, i.e. the roads to شجیرات and the کوت سیدسلطان corridor are back.
+
+The per-city radius now has a floor of **6 km** (was `0.9·√(pop/1000)`, so ویس got 3.5),
+because the roads that connect a town leave it well inside its built-up radius.
+
 ### Full screen is a different layout, and it was half-empty
 
 `preserveAspectRatio="xMidYMid slice"` crops, so in full screen the visible scene box is

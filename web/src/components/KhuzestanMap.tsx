@@ -485,6 +485,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
      demand from /geo/streets_<slug>.json). */
   const streetCache = useRef<Map<string, { c: string; p: [number, number][] }[]>>(new Map());
   const [streetCity, setStreetCity] = useState<string | null>(null);
+  /* tertiary / unclassified ways for the whole province: the roads *between* towns,
+     which the per-city files never held and which made a small town look stranded. */
+  const [connectors, setConnectors] = useState<{ c: string; p: [number, number][] }[] | null>(
+    null,
+  );
   const [streetLines, setStreetLines] = useState<{ c: string; p: [number, number][] }[]>([]);
   const streetIndex = useRef<{ city: string; slug: string; lat: number; lon: number; r_km: number }[] | null>(null);
 
@@ -516,6 +521,27 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       alive = false;
     };
   }, [mode, popCells]);
+
+  useEffect(() => {
+    if (!layers.streets || connectors || settled.k < 1.4) return;
+    let alive = true;
+    fetch("/geo/streets_connectors.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((fc: { features?: { properties?: { c?: string }; geometry?: { coordinates?: [number, number][] } }[] } | null) => {
+        if (!alive) return;
+        const feats = (fc?.features ?? [])
+          .map((f) => ({
+            c: f.properties?.c ?? "unclassified",
+            p: (f.geometry?.coordinates ?? []).map(([lo, la]) => [la, lo] as [number, number]),
+          }))
+          .filter((f) => f.p.length >= 2);
+        setConnectors(feats);
+      })
+      .catch(() => setConnectors([]));
+    return () => {
+      alive = false;
+    };
+  }, [layers.streets, connectors, settled.k]);
 
   /* Streets: one city at a time, whichever the view is centred on, fetched from
      2.5x. It used to start at 5x and draw at 4.5x, which left a band where the map
@@ -1155,6 +1181,59 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
   /* Urban streets, projected once and grouped by class. Only the city the view
      is centred on is loaded, and only above ~5x. */
+  const connectorPts = useMemo(() => {
+    if (!connectors?.length) return null;
+    return connectors.map((seg) => {
+      const pts = seg.p.map(([la, lo]) => scene.proj(la, lo));
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y] of pts) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+      return { c: seg.c, pts, box: [x0, y0, x1, y1] as [number, number, number, number] };
+    });
+  }, [connectors, scene]);
+
+  const connectorLayer = useMemo(() => {
+    if (!layers.streets || !connectorPts || view.k < 1.4) return null;
+    const vb = visibleBox();
+    const bx0 = (vb.x0 - view.tx) / view.k - 20 / view.k;
+    const by0 = (vb.y0 - view.ty) / view.k - 20 / view.k;
+    const bx1 = (vb.x1 - view.tx) / view.k + 20 / view.k;
+    const by1 = (vb.y1 - view.ty) / view.k + 20 / view.k;
+    const byClass = new Map<string, string[]>();
+    let n = 0;
+    for (const seg of connectorPts) {
+      const [x0, y0, x1, y1] = seg.box;
+      if (x1 < bx0 || x0 > bx1 || y1 < by0 || y0 > by1) continue;
+      let d = `M${seg.pts[0][0].toFixed(1)} ${seg.pts[0][1].toFixed(1)}`;
+      for (let i = 1; i < seg.pts.length; i++) d += `L${seg.pts[i][0].toFixed(1)} ${seg.pts[i][1].toFixed(1)}`;
+      const list = byClass.get(seg.c);
+      if (list) list.push(d);
+      else byClass.set(seg.c, [d]);
+      n += 1;
+      if (n > 24000) break;
+    }
+    const width: Record<string, number> = { tertiary: 1.5, unclassified: 1.0, living_street: 0.8 };
+    return (
+      <g pointerEvents="none" opacity={0.9}>
+        {[...byClass.entries()].map(([cls, ds]) => (
+          <path
+            key={cls}
+            d={ds.join(" ")}
+            fill="none"
+            stroke="#9aa8bc"
+            strokeWidth={(width[cls] ?? 1) / view.k}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ))}
+      </g>
+    );
+  }, [layers.streets, connectorPts, view.k, view.tx, view.ty]);
+
   const streetLayer = useMemo(() => {
     if (!layers.streets || !streetLines.length || view.k < 3.2) return null;
     const byClass = new Map<string, string[]>();
@@ -2026,6 +2105,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               ) : null}
               {layers.admin ? adminLayer : null}
               <g data-layer="roads">{roadLayer}</g>
+              <g data-layer="connectors">{connectorLayer}</g>
               {layers.density && view.k < 1.2 ? cellLayer : null}
               {layers.density && fineCells ? (
                 <g data-layer="density" shapeRendering="crispEdges" clipPath="url(#provClip)" opacity={0.92}>

@@ -164,699 +164,709 @@
   "slug": "city-38461f6d",
   "lat": 30.649722222,
   "lon": 48.664722222,
-  "r_km": 5.8,
-  "streets": 1157,
+  "r_km": 6.0,
+  "streets": 1196,
   "buildings": 0,
-  "cells": 1931
+  "cells": 2001
  },
  {
   "city": "شیبان",
   "slug": "city-1a833021",
   "lat": 31.408611111,
   "lon": 48.794166666,
-  "r_km": 5.4,
-  "streets": 524,
+  "r_km": 6.0,
+  "streets": 626,
   "buildings": 0,
-  "cells": 803
+  "cells": 970
  },
  {
   "city": "چمران",
   "slug": "city-61579e23",
   "lat": 30.7079723,
   "lon": 49.1635215,
-  "r_km": 5.2,
-  "streets": 428,
+  "r_km": 6.0,
+  "streets": 431,
   "buildings": 0,
-  "cells": 670
+  "cells": 682
  },
  {
   "city": "هندیجان",
   "slug": "city-1b314f7f",
   "lat": 30.236388888,
   "lon": 49.711944444,
-  "r_km": 4.8,
-  "streets": 448,
+  "r_km": 6.0,
+  "streets": 450,
   "buildings": 0,
-  "cells": 714
+  "cells": 716
  },
  {
   "city": "باغملک",
   "slug": "city-fbc00af9",
   "lat": 31.523611111,
   "lon": 49.889444444,
-  "r_km": 4.6,
-  "streets": 351,
+  "r_km": 6.0,
+  "streets": 431,
   "buildings": 0,
-  "cells": 585
+  "cells": 803
  },
  {
   "city": "رامشیر",
   "slug": "city-c1de764d",
   "lat": 30.894722222,
   "lon": 49.409166666,
-  "r_km": 4.5,
-  "streets": 352,
+  "r_km": 6.0,
+  "streets": 359,
   "buildings": 0,
-  "cells": 521
+  "cells": 564
  },
  {
   "city": "گتوند",
   "slug": "city-63eaa8d3",
   "lat": 32.245277777,
   "lon": 48.813888888,
-  "r_km": 4.4,
-  "streets": 546,
+  "r_km": 6.0,
+  "streets": 578,
   "buildings": 0,
-  "cells": 940
+  "cells": 1123
  },
  {
   "city": "حمیدیه",
   "slug": "city-5f0c3709",
   "lat": 31.485,
   "lon": 48.435277777,
-  "r_km": 4.2,
-  "streets": 335,
+  "r_km": 6.0,
+  "streets": 390,
   "buildings": 0,
-  "cells": 615
+  "cells": 806
  },
  {
   "city": "هویزه",
   "slug": "city-a111623e",
   "lat": 31.461944444,
   "lon": 48.073888888,
-  "r_km": 4.0,
-  "streets": 244,
+  "r_km": 6.0,
+  "streets": 274,
   "buildings": 0,
-  "cells": 323
+  "cells": 384
  },
  {
   "city": "لالی",
   "slug": "city-76267196",
   "lat": 32.328888888,
   "lon": 49.093611111,
-  "r_km": 3.9,
-  "streets": 299,
+  "r_km": 6.0,
+  "streets": 301,
   "buildings": 0,
-  "cells": 497
+  "cells": 528
  },
  {
   "city": "ملاثانی",
   "slug": "city-6480b7a2",
   "lat": 31.585,
   "lon": 48.885,
-  "r_km": 3.7,
-  "streets": 243,
+  "r_km": 6.0,
+  "streets": 270,
   "buildings": 0,
-  "cells": 421
+  "cells": 576
  },
  {
   "city": "هفتکل",
   "slug": "city-edea1f07",
   "lat": 31.446944444,
   "lon": 49.529444444,
-  "r_km": 3.6,
-  "streets": 298,
+  "r_km": 6.0,
+  "streets": 303,
   "buildings": 0,
-  "cells": 603
+  "cells": 632
  },
  {
   "city": "ویس",
   "slug": "city-f2580718",
   "lat": 31.4855352,
   "lon": 48.8758094,
-  "r_km": 3.5,
-  "streets": 229,
+  "r_km": 6.0,
+  "streets": 287,
   "buildings": 0,
-  "cells": 446
+  "cells": 598
  },
  {
   "city": "اغاجاری",
   "slug": "city-aae8ac87",
   "lat": 30.700555555,
   "lon": 49.831388888,
-  "r_km": 3.1,
-  "streets": 325,
+  "r_km": 6.0,
+  "streets": 363,
   "buildings": 0,
-  "cells": 645
+  "cells": 821
  },
  {
   "city": "شرافت",
   "slug": "city-992d2712",
   "lat": 32.0892117,
   "lon": 48.7684968,
-  "r_km": 3.1,
-  "streets": 197,
+  "r_km": 6.0,
+  "streets": 572,
   "buildings": 0,
-  "cells": 307
+  "cells": 892
  },
  {
   "city": "شهر امام",
   "slug": "city-fa306624",
   "lat": 32.2280083,
   "lon": 48.4246878,
-  "r_km": 3.0,
-  "streets": 115,
+  "r_km": 6.0,
+  "streets": 354,
   "buildings": 0,
-  "cells": 141
+  "cells": 437
  },
  {
   "city": "اروندکنار",
   "slug": "city-432a1111",
   "lat": 29.978888888,
   "lon": 48.520555555,
-  "r_km": 3.0,
-  "streets": 243,
+  "r_km": 6.0,
+  "streets": 658,
   "buildings": 0,
-  "cells": 380
+  "cells": 1030
  },
  {
   "city": "شمساباد",
   "slug": "city-10227861",
   "lat": 32.29833333,
   "lon": 48.42888889,
-  "r_km": 3.0,
-  "streets": 208,
+  "r_km": 6.0,
+  "streets": 637,
   "buildings": 0,
-  "cells": 397
+  "cells": 1118
  },
  {
   "city": "دزاب",
   "slug": "city-79af4aa6",
   "lat": 32.298333333,
   "lon": 48.428888888,
-  "r_km": 3.0,
-  "streets": 208,
+  "r_km": 6.0,
+  "streets": 637,
   "buildings": 0,
-  "cells": 397
+  "cells": 1118
  },
  {
   "city": "قلعهتل",
   "slug": "city-bc3a5969",
   "lat": 31.630555555,
   "lon": 49.891111111,
-  "r_km": 3.0,
-  "streets": 182,
+  "r_km": 6.0,
+  "streets": 243,
   "buildings": 0,
-  "cells": 409
+  "cells": 540
  },
  {
   "city": "صفیاباد",
   "slug": "city-bf6e0c92",
   "lat": 32.241388888,
   "lon": 49.488333333,
-  "r_km": 3.0,
-  "streets": 8,
+  "r_km": 6.0,
+  "streets": 71,
   "buildings": 0,
-  "cells": 78
+  "cells": 338
  },
  {
   "city": "شاوور",
   "slug": "city-e0f55c3e",
   "lat": 32.0564315,
   "lon": 48.3043796,
-  "r_km": 3.0,
-  "streets": 134,
+  "r_km": 6.0,
+  "streets": 302,
   "buildings": 0,
-  "cells": 220
+  "cells": 593
  },
  {
   "city": "بستان",
   "slug": "city-a36b60c0",
   "lat": 31.7215101,
   "lon": 47.9867165,
-  "r_km": 3.0,
-  "streets": 130,
+  "r_km": 6.0,
+  "streets": 144,
   "buildings": 0,
-  "cells": 212
+  "cells": 278
  },
  {
   "city": "چویبده",
   "slug": "city-825b9587",
   "lat": 30.20361111,
   "lon": 48.55388889,
-  "r_km": 3.0,
-  "streets": 56,
+  "r_km": 6.0,
+  "streets": 196,
   "buildings": 0,
-  "cells": 107
+  "cells": 324
  },
  {
   "city": "الهایی",
   "slug": "city-3ae8dfe7",
   "lat": 31.65388889,
   "lon": 48.59444444,
-  "r_km": 3.0,
-  "streets": 116,
+  "r_km": 6.0,
+  "streets": 209,
   "buildings": 0,
-  "cells": 230
+  "cells": 514
  },
  {
   "city": "صیدون",
   "slug": "city-530f5c2c",
   "lat": 31.360277777,
   "lon": 50.076388888,
-  "r_km": 3.0,
-  "streets": 169,
+  "r_km": 6.0,
+  "streets": 211,
   "buildings": 0,
-  "cells": 785
+  "cells": 1213
  },
  {
   "city": "صالح شهر",
   "slug": "city-94b47e2b",
   "lat": 32.2120495,
   "lon": 48.6722366,
-  "r_km": 3.0,
-  "streets": 89,
+  "r_km": 6.0,
+  "streets": 90,
   "buildings": 0,
-  "cells": 115
+  "cells": 146
  },
  {
   "city": "الوان",
   "slug": "city-220d34c2",
   "lat": 32.111388888,
   "lon": 48.46,
-  "r_km": 3.0,
-  "streets": 16,
+  "r_km": 6.0,
+  "streets": 193,
   "buildings": 0,
-  "cells": 51
+  "cells": 372
  },
  {
   "city": "حمزه",
   "slug": "city-0ee77a17",
   "lat": 32.3918951,
   "lon": 48.5790869,
-  "r_km": 3.0,
-  "streets": 94,
+  "r_km": 6.0,
+  "streets": 124,
   "buildings": 0,
-  "cells": 101
+  "cells": 177
  },
  {
   "city": "ترکالکی",
   "slug": "city-8c7936af",
   "lat": 32.242777777,
   "lon": 48.848611111,
-  "r_km": 3.0,
-  "streets": 170,
+  "r_km": 6.0,
+  "streets": 607,
   "buildings": 0,
-  "cells": 402
+  "cells": 1188
  },
  {
   "city": "دارخوین",
   "slug": "city-c26db6a7",
   "lat": 30.74388889,
   "lon": 48.42416667,
-  "r_km": 3.0,
-  "streets": 112,
+  "r_km": 6.0,
+  "streets": 131,
   "buildings": 0,
-  "cells": 193
+  "cells": 267
  },
  {
   "city": "ابوحمیظه",
   "slug": "city-aa163cfe",
   "lat": 31.53,
   "lon": 48.219722222,
-  "r_km": 3.0,
-  "streets": 47,
+  "r_km": 6.0,
+  "streets": 853,
   "buildings": 0,
-  "cells": 86
+  "cells": 1282
  },
  {
   "city": "چم گلک",
   "slug": "city-7091afe3",
   "lat": 32.44611111,
   "lon": 48.44305556,
-  "r_km": 3.0,
-  "streets": 488,
+  "r_km": 6.0,
+  "streets": 954,
   "buildings": 0,
-  "cells": 765
+  "cells": 1400
  },
  {
   "city": "منصوریه",
   "slug": "city-790c230e",
   "lat": 30.6284232,
   "lon": 50.304706,
-  "r_km": 3.0,
-  "streets": 119,
+  "r_km": 6.0,
+  "streets": 583,
   "buildings": 0,
-  "cells": 227
+  "cells": 1090
  },
  {
   "city": "سیاه منصور",
   "slug": "city-bbfa4c01",
   "lat": 32.3311531,
   "lon": 48.4961792,
-  "r_km": 3.0,
-  "streets": 71,
+  "r_km": 6.0,
+  "streets": 245,
   "buildings": 0,
-  "cells": 147
+  "cells": 476
  },
  {
   "city": "جنت مکان",
   "slug": "city-2e1415cd",
   "lat": 32.1836847,
   "lon": 48.8146563,
-  "r_km": 3.0,
-  "streets": 107,
+  "r_km": 6.0,
+  "streets": 251,
   "buildings": 0,
-  "cells": 249
+  "cells": 623
  },
  {
   "city": "جندی شاپور",
   "slug": "city-56040468",
   "lat": 32.306666666,
   "lon": 48.512777777,
-  "r_km": 3.0,
-  "streets": 59,
+  "r_km": 6.0,
+  "streets": 181,
   "buildings": 0,
-  "cells": 136
+  "cells": 365
  },
  {
   "city": "سرداران",
   "slug": "city-5faff160",
   "lat": 32.0206734,
   "lon": 48.7899226,
-  "r_km": 3.0,
-  "streets": 80,
+  "r_km": 6.0,
+  "streets": 919,
   "buildings": 0,
-  "cells": 162
+  "cells": 1339
  },
  {
   "city": "شهر منتظران",
   "slug": "city-0a176514",
   "lat": 32.269381,
   "lon": 48.3847707,
-  "r_km": 3.0,
-  "streets": 179,
+  "r_km": 6.0,
+  "streets": 595,
   "buildings": 0,
-  "cells": 229
+  "cells": 956
  },
  {
   "city": "ازادی",
   "slug": "city-9d7a97b5",
   "lat": 32.4041735,
   "lon": 48.2512579,
-  "r_km": 3.0,
-  "streets": 84,
+  "r_km": 6.0,
+  "streets": 141,
   "buildings": 0,
-  "cells": 107
+  "cells": 248
  },
  {
   "city": "کوت سید نعیم",
   "slug": "city-9238a82d",
   "lat": 31.4579456,
   "lon": 48.3818881,
-  "r_km": 3.0,
-  "streets": 39,
+  "r_km": 6.0,
+  "streets": 265,
   "buildings": 0,
-  "cells": 120
+  "cells": 599
  },
  {
   "city": "تشان",
   "slug": "city-4a0d7cbe",
   "lat": 30.8292,
   "lon": 50.1983,
-  "r_km": 3.0,
-  "streets": 110,
+  "r_km": 6.0,
+  "streets": 184,
   "buildings": 0,
-  "cells": 299
+  "cells": 612
  },
  {
   "city": "رفیع",
   "slug": "city-dc743c81",
   "lat": 31.59583333,
   "lon": 47.89472222,
-  "r_km": 3.0,
-  "streets": 135,
+  "r_km": 6.0,
+  "streets": 147,
   "buildings": 0,
-  "cells": 165
+  "cells": 220
  },
  {
   "city": "میداوود",
   "slug": "city-de6c51e5",
   "lat": 31.3719866,
   "lon": 49.8129372,
-  "r_km": 3.0,
-  "streets": 84,
+  "r_km": 6.0,
+  "streets": 164,
   "buildings": 0,
-  "cells": 204
+  "cells": 507
  },
  {
   "city": "فتحالمبین",
   "slug": "city-d5b66f65",
   "lat": 32.313844,
   "lon": 48.1479421,
-  "r_km": 3.0,
-  "streets": 32,
+  "r_km": 6.0,
+  "streets": 81,
   "buildings": 0,
-  "cells": 43
+  "cells": 231
  },
  {
   "city": "گوریه",
   "slug": "city-81678439",
   "lat": 31.8559767,
   "lon": 48.7563581,
-  "r_km": 3.0,
-  "streets": 61,
+  "r_km": 6.0,
+  "streets": 195,
   "buildings": 0,
-  "cells": 151
+  "cells": 362
  },
  {
   "city": "صالح مشطت",
   "slug": "city-1d1560ef",
   "lat": 32.3125,
   "lon": 48.14472222,
-  "r_km": 3.0,
-  "streets": 32,
+  "r_km": 6.0,
+  "streets": 79,
   "buildings": 0,
-  "cells": 43
+  "cells": 224
  },
  {
   "city": "سالند",
   "slug": "city-c9772031",
   "lat": 32.49972222,
   "lon": 48.83666667,
-  "r_km": 3.0,
-  "streets": 65,
+  "r_km": 6.0,
+  "streets": 105,
   "buildings": 0,
-  "cells": 289
+  "cells": 513
  },
  {
   "city": "قلعه خواجه",
   "slug": "city-06d80b6c",
   "lat": 32.20638889,
   "lon": 49.44361111,
-  "r_km": 3.0,
-  "streets": 41,
+  "r_km": 6.0,
+  "streets": 83,
   "buildings": 0,
-  "cells": 249
+  "cells": 432
  },
  {
   "city": "بیدروبه",
   "slug": "city-fa034d95",
   "lat": 32.7611171,
   "lon": 48.2373019,
-  "r_km": 3.0,
-  "streets": 86,
+  "r_km": 6.0,
+  "streets": 129,
   "buildings": 0,
-  "cells": 210
+  "cells": 456
  },
  {
   "city": "جایزان",
   "slug": "city-96e14c2e",
   "lat": 30.883333,
   "lon": 49.85,
-  "r_km": 3.0,
-  "streets": 96,
+  "r_km": 6.0,
+  "streets": 166,
   "buildings": 0,
-  "cells": 234
+  "cells": 410
  },
  {
   "city": "رودزرد ماشین",
   "slug": "city-10b2fa70",
   "lat": 31.3700914,
   "lon": 49.7209535,
-  "r_km": 3.0,
-  "streets": 34,
+  "r_km": 6.0,
+  "streets": 36,
   "buildings": 0,
-  "cells": 142
+  "cells": 152
  },
  {
   "city": "مینوشهر",
   "slug": "city-8aad53f4",
   "lat": 30.35,
   "lon": 48.21666667,
-  "r_km": 3.0,
-  "streets": 304,
+  "r_km": 6.0,
+  "streets": 1984,
   "buildings": 0,
-  "cells": 693
+  "cells": 3215
  },
  {
   "city": "مشراگه",
   "slug": "city-2391ab65",
   "lat": 31.0098009,
   "lon": 49.4369137,
-  "r_km": 3.0,
-  "streets": 49,
+  "r_km": 6.0,
+  "streets": 86,
   "buildings": 0,
-  "cells": 182
+  "cells": 324
  },
  {
   "city": "چغامیش",
   "slug": "city-57066d45",
   "lat": 32.20916667,
   "lon": 48.54611111,
-  "r_km": 3.0,
-  "streets": 30,
+  "r_km": 6.0,
+  "streets": 135,
   "buildings": 0,
-  "cells": 58
+  "cells": 257
  },
  {
   "city": "حسینیه",
   "slug": "city-1058ec5b",
   "lat": 32.68305556,
   "lon": 48.245,
-  "r_km": 3.0,
-  "streets": 96,
+  "r_km": 6.0,
+  "streets": 110,
   "buildings": 0,
-  "cells": 203
+  "cells": 355
  },
  {
   "city": "سماله",
   "slug": "city-e6004c15",
   "lat": 32.20111111,
   "lon": 48.86055556,
-  "r_km": 3.0,
-  "streets": 70,
+  "r_km": 6.0,
+  "streets": 346,
   "buildings": 0,
-  "cells": 245
+  "cells": 879
  },
  {
   "city": "ابژدان",
   "slug": "city-689c6a93",
   "lat": 32.0674391,
   "lon": 49.462002,
-  "r_km": 3.0,
-  "streets": 76,
+  "r_km": 6.0,
+  "streets": 106,
   "buildings": 0,
-  "cells": 370
+  "cells": 670
  },
  {
   "city": "جولکی",
   "slug": "city-b91c7e12",
   "lat": 30.8202978,
   "lon": 49.8869493,
-  "r_km": 3.0,
-  "streets": 65,
+  "r_km": 6.0,
+  "streets": 97,
   "buildings": 0,
-  "cells": 130
+  "cells": 302
  },
  {
   "city": "میانکوه",
   "slug": "city-ffc7f587",
   "lat": 30.7881413,
   "lon": 49.7302405,
-  "r_km": 3.0,
-  "streets": 499,
+  "r_km": 6.0,
+  "streets": 1629,
   "buildings": 0,
-  "cells": 871
+  "cells": 2667
  },
  {
   "city": "زهره",
   "slug": "city-1b940abe",
   "lat": 30.469167,
   "lon": 49.684444,
-  "r_km": 3.0,
-  "streets": 67,
+  "r_km": 6.0,
+  "streets": 116,
   "buildings": 0,
-  "cells": 169
+  "cells": 284
  },
  {
   "city": "گلگیر",
   "slug": "city-4fcca113",
   "lat": 31.7647539,
   "lon": 49.4983012,
-  "r_km": 3.0,
-  "streets": 10,
+  "r_km": 6.0,
+  "streets": 21,
   "buildings": 0,
-  "cells": 62
+  "cells": 118
  },
  {
   "city": "زاووت",
   "slug": "city-54abcad4",
   "lat": 32.4031,
   "lon": 49.6892,
-  "r_km": 3.0,
-  "streets": 20,
+  "r_km": 6.0,
+  "streets": 25,
   "buildings": 0,
-  "cells": 102
+  "cells": 269
  },
  {
   "city": "شهیون",
   "slug": "city-ae1be769",
   "lat": 32.615,
   "lon": 48.585277777,
-  "r_km": 3.0,
-  "streets": 121,
+  "r_km": 6.0,
+  "streets": 219,
   "buildings": 0,
-  "cells": 343
+  "cells": 630
  },
  {
   "city": "سلطاناباد",
   "slug": "city-17b9572a",
   "lat": 31.0485275,
   "lon": 49.6985692,
-  "r_km": 3.0,
-  "streets": 37,
+  "r_km": 6.0,
+  "streets": 61,
   "buildings": 0,
-  "cells": 92
+  "cells": 174
  },
  {
   "city": "عنبر",
   "slug": "city-d8c287f8",
   "lat": 32.2661631,
   "lon": 49.0128947,
-  "r_km": 3.0,
-  "streets": 8,
+  "r_km": 6.0,
+  "streets": 12,
   "buildings": 0,
-  "cells": 122
+  "cells": 234
  },
  {
   "city": "باوج",
   "slug": "city-6d666399",
   "lat": 31.1467998,
   "lon": 49.9135269,
-  "r_km": 3.0,
-  "streets": 52,
+  "r_km": 6.0,
+  "streets": 90,
   "buildings": 0,
-  "cells": 238
+  "cells": 435
  },
  {
   "city": "تراز",
   "slug": "city-86fb20e9",
   "lat": 32.4159807,
   "lon": 49.1417252,
-  "r_km": 3.0,
-  "streets": 21,
+  "r_km": 6.0,
+  "streets": 28,
   "buildings": 0,
-  "cells": 128
+  "cells": 195
  },
  {
   "city": "رغیوه",
   "slug": "city-319dfacf",
   "lat": 31.5501651,
   "lon": 49.2387195,
-  "r_km": 3.0,
-  "streets": 20,
+  "r_km": 6.0,
+  "streets": 25,
   "buildings": 0,
-  "cells": 73
+  "cells": 90
  },
  {
   "city": "خنافره",
   "slug": "city-e0e5fdfa",
   "lat": 30.6326669,
   "lon": 48.6331848,
-  "r_km": 3.0,
-  "streets": 344,
+  "r_km": 6.0,
+  "streets": 1011,
   "buildings": 0,
-  "cells": 672
+  "cells": 1702
+ },
+ {
+  "city": "میانرود",
+  "slug": "city-61e7ca49",
+  "lat": 32.47,
+  "lon": 49.111388888,
+  "r_km": 6.0,
+  "streets": 12,
+  "buildings": 0,
+  "cells": 107
  }
 ]

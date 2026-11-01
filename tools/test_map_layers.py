@@ -61,6 +61,11 @@ PROBE = r"""() => {
     const s = (p.getAttribute('stroke') || '').toLowerCase();
     return s === '#94a3b8' || s === '#cbd5e1' || s === '#e2e8f0';
   }).length;
+  const connEls = [...svg.querySelectorAll('path')].filter((p) => {
+    const s = (p.getAttribute('stroke') || '').toLowerCase();
+    return s === '#9aa8bc';
+  });
+  const connectors = connEls.reduce((n, p) => n + ((p.getAttribute('d') || '').match(/M/g) || []).length, 0);
   const cells = [...svg.querySelectorAll('rect')].filter((r) => /^rgb\(/.test(r.getAttribute('fill') || '')).length;
   const pharm = svg.querySelectorAll('path[fill="#d97706"]').length;
   const med = [...svg.querySelectorAll('path,circle')].filter((n) => {
@@ -73,7 +78,7 @@ PROBE = r"""() => {
   const m = g.match(/scale\(([\d.]+)\)/);
   return {
     k: m ? Number(m[1]) : null,
-    streetPaths, streetSegs, roadPaths, cells, pharm, med,
+    streetPaths, streetSegs, roadPaths, connectors, cells, pharm, med,
     labels: labels.length,
     labelSample: labels.slice(0, 4),
     tiles: tiles.length,
@@ -97,6 +102,7 @@ CASES = [
     ("dezful-9x",    32.3810, 48.4050,  9.0, True),
     ("ramhormoz-9x", 31.2790, 49.6040,  9.0, True),
     ("behbahan-9x",  30.5960, 50.2420,  9.0, True),
+    ("veis-12x",     31.4855, 48.8758, 12.0, True),
     ("desert-9x",    31.9000, 48.1000,  9.0, False),
 ]
 
@@ -199,6 +205,11 @@ def run_case(pg, base: str, name: str, lat: float, lon: float, k: float,
     if expect_streets:
         check("street layer draws", d["streetSegs"] > 50,
               f"{d['streetSegs']} polylines in {d['streetPaths']} paths at k={d['k']}")
+
+    # the roads between towns must exist from 1.4x, or a small town looks stranded
+    if d["k"] >= 1.4:
+        check("connector roads draw", d["connectors"] > 20,
+              f"{d['connectors']} tertiary/unclassified ways")
     else:
         print(f"  note  streets not expected here ({d['streetPaths']} paths drawn)")
 

@@ -46,6 +46,10 @@ UA = {"User-Agent": "pharmacy-location-intelligence/1.0 (research; site selectio
 BOX = (29.70, 47.30, 33.30, 50.90)
 GRID = 4
 STREET_KM_MAX = 12.0   # a city is an area: 6 km clipped اهواز in half
+# A 20k town has a 4 km built-up radius, but the roads that *connect* it leave town
+# well inside that — ویس had 229 segments and looked unconnected. Every town gets at
+# least this much ground.
+STREET_KM_MIN = 6.0
 
 
 def hav(alat, alon, blat, blon):
@@ -96,7 +100,8 @@ def fetch_tiles() -> None:
 
 def split_tiles(cities: list[dict]) -> None:
     buckets: dict[str, list[dict]] = {c["name"]: [] for c in cities}
-    radii = {c["name"]: min(city_radius_km(c["pop"]), STREET_KM_MAX) for c in cities}
+    radii = {c["name"]: min(max(city_radius_km(c["pop"]), STREET_KM_MIN), STREET_KM_MAX)
+             for c in cities}
     # cities on a coarse grid so a way only tests the towns near it, not all 100
     grid: dict[tuple[int, int], list[dict]] = {}
     for c in cities:
@@ -174,7 +179,8 @@ def split_tiles(cities: list[dict]) -> None:
             [(name, k[0], k[1], 0, None, round(v, 1)) for k, v in cells.items()])
         c.commit()
         index[name] = {"city": name, "slug": sl, "lat": city["lat"], "lon": city["lon"],
-                       "r_km": round(min(city_radius_km(city["pop"]), STREET_KM_MAX), 1),
+                       "r_km": round(min(max(city_radius_km(city["pop"]), STREET_KM_MIN),
+                                         STREET_KM_MAX), 1),
                        "streets": len(segs), "buildings": 0, "cells": len(cells)}
         written += 1
         print(f"  {name}: {len(segs):,} segments · {len(cells):,} cells", flush=True)
