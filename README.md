@@ -328,6 +328,31 @@ and never double-counted:
 Every settlement tooltip/card shows the split — جمعیت, داروخانه (FDA), نقشهشده,
 بدون موقعیت — and the header chip reads «۸۹۴ داروخانه در فید سازمان · ۴۱۹ روی نقشه».
 
+### Judging the hard tail with a model (`etl/classify_with_llm.py`)
+
+The rules settle what the name says. They cannot settle `Dr. Sadeghi`, `بگا`,
+`مرکز مشاوره پیوند مهر` or `خوزستان دزفول صفی آباد` — 114 rows today. Those go to a
+model over **OpenRouter**, with the key and the model name stored in `app_setting`
+from `/settings` (key masked to its last four characters, model shown as typed).
+
+```bash
+python etl/classify_with_llm.py                 # count + sample, no key needed
+python etl/classify_with_llm.py --run           # call the model, cache verdicts
+python etl/classify_with_llm.py --run --apply   # move/delete after judging
+python etl/classify_with_llm.py --check         # offline: prompt + parser self-test
+```
+
+The prompt asks for one JSON array — role plus confidence — and names the traps
+(عطاری is not a pharmacy, تجهیزات پزشکی is not a hospital, a street called داروخانه is
+a street). Verdicts land in `poi_classification(src, ref, name, role, confidence,
+model, prompt_v)`, keyed by model, so a re-run costs nothing. `--apply` touches only
+`confidence >= 0.85`: a pharmacy judged to be a doctor's office moves to the medical
+layer, `irrelevant` is deleted, everything else waits.
+
+`/api/settings/test` verifies both halves without a key: the model id is checked
+against the live OpenRouter catalogue, and the key is checked with `GET /api/v1/key`
+(a wrong key comes back 401 with OpenRouter's own reason).
+
 ### What counts as a pharmacy or a clinic (`etl/classify_poi.py`)
 
 Google's `types` are not trustworthy in Iran: a tire shop came back as

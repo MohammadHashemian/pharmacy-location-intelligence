@@ -14,12 +14,28 @@ export const PROVIDERS = [
     label: "نشان (Neshan)",
     hint: "کلید نوع «سرویس» (با پیشوند service.) — کلیدهای web.… فقط برای SDK نقشه در مرورگر کار می‌کنند و API با خطای ۴۸۳ رد می‌کند؛ سرویس «مکان‌های نزدیک» یا «جستجو» را انتخاب کنید (فعال‌سازی با تیکت).",
     docs: "https://platform.neshan.org",
+    secret: true,
   },
   {
     key: "google_places_key",
     label: "Google Places",
     hint: "کلید Places API (New) با صورتحساب. ۵٬۰۰۰ فراخوان در ماه رایگان؛ سرویس Near/Text Search در SKU «Pro» حدود $۳۲ برای هر ۱٬۰۰۰ فراخوان. توجه: ایران در فهرست Prohibited Territories گوگل است.",
     docs: "https://console.cloud.google.com/google/maps-apis",
+    secret: true,
+  },
+  {
+    key: "openrouter_api_key",
+    label: "OpenRouter (کلید)",
+    hint: "کلید از openrouter.ai/keys. برای نام‌هایی که قاعده‌ها نمی‌توانند تعیین کنند (داروخانه یا مطب یا نامرتبط) استفاده می‌شود؛ فقط سرور آن را می‌خواند و در مرورگر پوشانده می‌شود.",
+    docs: "https://openrouter.ai/keys",
+    secret: true,
+  },
+  {
+    key: "openrouter_model",
+    label: "OpenRouter (نام مدل)",
+    hint: "شناسهٔ مدل، مثل google/gemini-2.5-flash یا openai/gpt-4o-mini. کار این مدل فقط برچسب‌زدن است، پس ارزان‌ترین مدل کافی است.",
+    docs: "https://openrouter.ai/models",
+    secret: false,
   },
 ] as const;
 
@@ -31,7 +47,9 @@ export type SettingStatus = {
   hint: string;
   docs: string;
   configured: boolean;
-  /** Only the last 4 characters are ever returned. */
+  /** false for a value that is not a credential (a model name), shown as typed. */
+  secret: boolean;
+  /** Only the last 4 characters of a secret are ever returned. */
   masked: string | null;
   updatedAt: string | null;
 };
@@ -85,7 +103,8 @@ export function listStatus(): SettingStatus[] {
       hint: p.hint,
       docs: p.docs,
       configured: !!row?.value,
-      masked: row?.value ? maskKey(row.value) : null,
+      secret: p.secret,
+      masked: row?.value ? (p.secret ? maskKey(row.value) : row.value) : null,
       updatedAt: row?.updated_at ?? null,
     };
   });

@@ -13,6 +13,7 @@ type TestResult = {
   provider?: string;
   found?: number;
   sample?: { title: string; address: string }[];
+  message?: string;
   error?: string;
   detail?: string;
   status?: number;
@@ -114,7 +115,9 @@ export function SettingsForm({ initial }: { initial: SettingStatus[] }) {
 
             {p.configured ? (
               <div className="tnum mt-2 rounded-lg border border-line bg-surface-2 px-2 py-1.5 text-[11px] text-ink-soft">
-                <span className="text-faint">کلید ذخیره‌شده: </span>
+                <span className="text-faint">
+                  {p.secret ? "کلید ذخیره‌شده: " : "مقدار ذخیره‌شده: "}
+                </span>
                 {p.masked}
                 {p.updatedAt ? (
                   <span className="text-faint">
@@ -128,7 +131,7 @@ export function SettingsForm({ initial }: { initial: SettingStatus[] }) {
 
             <div className="mt-2 flex gap-1.5">
               <input
-                type="password"
+                type={p.secret ? "password" : "text"}
                 autoComplete="off"
                 spellCheck={false}
                 dir="ltr"
@@ -136,7 +139,13 @@ export function SettingsForm({ initial }: { initial: SettingStatus[] }) {
                 onChange={(e) =>
                   setDraft((d) => ({ ...d, [p.key]: e.target.value }))
                 }
-                placeholder={p.configured ? "کلید جدید برای جایگزینی…" : "کلید را اینجا بچسبانید"}
+                placeholder={
+                  p.secret
+                    ? p.configured
+                      ? "کلید جدید برای جایگزینی…"
+                      : "کلید را اینجا بچسبانید"
+                    : "google/gemini-2.5-flash"
+                }
                 className="min-w-0 flex-1 rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-left text-[11.5px] text-ink placeholder:text-right placeholder:text-faint"
               />
               <button
@@ -156,7 +165,7 @@ export function SettingsForm({ initial }: { initial: SettingStatus[] }) {
                 onClick={() => runTest(p.key)}
                 className="rounded-lg border border-line-strong bg-surface px-2 py-1 text-[11px] text-ink-soft disabled:opacity-40"
               >
-                تست کلید
+                {p.secret ? "تست کلید" : "بررسی مدل"}
               </button>
               <button
                 type="button"
@@ -172,7 +181,7 @@ export function SettingsForm({ initial }: { initial: SettingStatus[] }) {
                 rel="noreferrer"
                 className="text-[10.5px] text-accent hover:underline"
               >
-                گرفتن کلید ↗
+                {p.secret ? "گرفتن کلید ↗" : "فهرست مدل‌ها ↗"}
               </a>
               {noteText ? (
                 <span className="text-[10.5px] text-brand-ink">{noteText}</span>
@@ -189,8 +198,12 @@ export function SettingsForm({ initial }: { initial: SettingStatus[] }) {
               >
                 {t.ok ? (
                   <>
-                    کلید کار می‌کند · {t.provider} · {t.found} نتیجهٔ «داروخانه» در ۵
-                    کیلومتری اهواز
+                    {t.message ?? (
+                      <>
+                        کلید کار می‌کند · {t.provider} · {t.found} نتیجهٔ «داروخانه» در
+                        ۵ کیلومتری اهواز
+                      </>
+                    )}
                     {t.sample?.length ? (
                       <ul className="mt-1 space-y-0.5 text-ink-soft">
                         {t.sample.map((s, i) => (
