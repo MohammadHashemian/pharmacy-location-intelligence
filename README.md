@@ -371,6 +371,39 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Deep zoom on satellite imagery (`tools/test_satellite_zoom.py`)
+
+`MAX_ZOOM` was 40, which put the map at ~12 m/px — Esri zoom 14, «an aerial photo», not «I
+can see the roof». Detail is a function of the scene scale (194 units per degree), so the
+ceiling is now **600×** (~0.84 m/px) and the tile loader follows:
+
+* zoom requested up to **18**, with `devicePixelRatio` in the formula (a 2× screen needs one
+  more step to look sharp);
+* **19 is excluded** — measured: over خوزستان it answers `200` with a **2 KB placeholder**,
+  not imagery. z18 is real (17–24 KB);
+* forced to 18 from 300× — rounding the formula down there is what made deep zoom look
+  upscaled;
+* tile cap 64 → **200**: at z18 the screen needs ~99 tiles, so the old cap left 27 % of the
+  frame blank at 300× (100 % coverage now);
+* a missing tile falls back to its **parent** instead of showing a hole;
+* the density wash **fades out above 80×** (0.45 at 80–200, 0 past 200). At building scale one
+  500 m cell covers the whole screen and its teal fill was acting as a colour filter over the
+  photo.
+
+```bash
+python tools/test_satellite_zoom.py --shots
+```
+
+Eight zooms from 8× to 600×, asserting: tiles present, the zoom actually requested, ≥95 %
+coverage, and that density cells, streets, markers and labels all still render — because
+zooming deeper must not cost a decision layer. All pass; screenshots in
+`tools/shots/satzoom/`.
+
+Honest limit: Esri's z18 over اهواز is roughly 0.6–1 m/px and partly older capture, so
+individual buildings and courtyards read, cars and sharp shadows do not. Google's imagery is
+denser but Iran is in Google's Prohibited Territory for Maps Platform, so it is not an option
+for a real deployment — Neshan is the compliant path once its tile service is enabled.
+
 ### Markers must sit on their own coordinate (`tools/test_marker_accuracy.py`)
 
 «The marker does not match the address» has two very different causes and they need

@@ -37,7 +37,10 @@ import { PlacePanel } from "@/components/PharmacyPanel";
 const W = 660;
 const H = 820;
 const PAD = 14;
-const MAX_ZOOM = 40;
+/* 40x put the map at ~12 m/px — Esri zoom 14, which is «aerial photo», not «I can see
+   the roof». Detail is a function of the scene scale (194 units per degree), so 600x
+   lands near 0.7 m/px and the tile loader below asks for z18-19 there. */
+const MAX_ZOOM = 600;
 const RING_EDGES = [25, 50, 75, 100, 150, 200, 300];
 
 /* Marker sizes are radii in CSS px. They grow a little with zoom so a diamond is
@@ -1636,7 +1639,17 @@ export function KhuzestanMap({ data }: { data: MapData }) {
        across": one level short upsampled the image ~4x and the city read as flat
        desert. 256 px of tile per 360/2^z degrees, so z = log2(pxPerDeg*360/256). */
     const pxPerDeg = (svgRef.current?.clientWidth || W) / lonSpan;
-    const z = Math.max(7, Math.min(17, Math.round(Math.log2((pxPerDeg * 360) / 256))));
+    /* Device pixels, not CSS pixels: a 2x screen needs one tile step more to look
+       sharp, and Esri serves World Imagery up to z19 in the province. */
+    const dpr = typeof window === "undefined" ? 1 : Math.min(3, window.devicePixelRatio || 1);
+    /* z19 answers with a 2 KB placeholder over خوزستان — measured, not assumed — so
+       the real ceiling is 18; the parent-tile fallback covers the rest. */
+    let z = Math.max(7, Math.min(18,
+      Math.round(Math.log2((pxPerDeg * dpr * 360) / 256))));
+    /* Past ~300x the screen is finer than z17's metre-per-pixel, and rounding down
+       there is what made deep zoom look upscaled. Ask for the best tile the source
+       has (18 in خوزستان; 19 returns a 2 KB placeholder). */
+    if (view.k >= 300) z = 18;
     const n = 2 ** z;
     const yOf = (lat: number) =>
       (1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) /
@@ -1648,9 +1661,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     const ty0 = Math.floor(yOf(latN) * n);
     const ty1 = Math.floor(yOf(latS) * n);
     const out: { key: string; href: string; x: number; y: number; w: number; h: number }[] = [];
-    for (let ty = ty0; ty <= ty1 && out.length < 64; ty++) {
+    for (let ty = ty0; ty <= ty1 && out.length < 200; ty++) {
       if (ty < 0 || ty >= n) continue;
-      for (let tx = tx0; tx <= tx1 && out.length < 64; tx++) {
+      for (let tx = tx0; tx <= tx1 && out.length < 200; tx++) {
         const wrap = ((tx % n) + n) % n;
         const [ax, ay] = scene.proj(latOf(ty), lonOf(tx));
         const [bx, by] = scene.proj(latOf(ty + 1), lonOf(tx + 1));
@@ -2191,6 +2204,22 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                       height={t.h}
                       preserveAspectRatio="none"
                       style={{ imageRendering: "auto" }}
+                      /* Rural Iran is not photographed at z19. When the tile is
+                         missing, take the parent tile instead of showing a hole;
+                         the browser caches it, so this costs one request. */
+                      onError={(e) => {
+                        const el = e.currentTarget;
+                        const m = el.getAttribute("href")?.match(/tile\/(\d+)\/(\d+)\/(\d+)/);
+                        if (!m) return;
+                        const zz = Number(m[1]);
+                        if (zz <= 12) return;
+                        const px = Math.floor(Number(m[3]) / 2);
+                        const py = Math.floor(Number(m[2]) / 2);
+                        el.setAttribute(
+                          "href",
+                          `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zz - 1}/${py}/${px}`,
+                        );
+                      }}
                     />
                   ))}
                 </g>
@@ -2232,7 +2261,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                           ? 0
                           : ((view.k >= 4.5 ? 0.17 : 0.35) +
                               0.45 * Math.min(1, c.v / fineCells.cap)) *
-                            (layers.sat ? 0.8 : 1)
+                            (layers.sat ? 0.8 : 1) *
+                            /* Past 80x a single 500 m cell covers the screen and its
+                               wash is a teal filter over the photo: the statistic is
+                               meaningless at building scale, so fade it out rather
+                               than pretend it means something. */
+                            (view.k <= 80 ? 1 : view.k <= 200 ? 0.45 : 0)
                       }
                     />
                   ))}
