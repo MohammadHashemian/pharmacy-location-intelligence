@@ -84,7 +84,7 @@ type Road = { d: string; cls: string; b: [number, number, number, number] };
 
 type Scene = {
   proj: Proj;
-  pharm: { x: number; y: number }[];
+  pharm: { x: number; y: number; i: number }[];
   /** Clinics, doctors, dentists, hospitals, labs — the demand side. */
   med: { x: number; y: number }[];
   /** Screen units -> degrees, and km per scene unit (for the scale bar). */
@@ -254,9 +254,11 @@ function buildScene(data: MapData): Scene {
     scale,
     cellW: 0.033 * kx * scale,
     cellH: 0.03 * scale,
-    pharm: data.pharmacies.map((p) => {
+    pharm: data.pharmacies.map((p, i) => {
       const [x, y] = proj(p.lat, p.lon);
-      return { x, y };
+      // `i` keeps the drawn marker tied to the row it came from, so the rendered
+      // position can be checked against the coordinate instead of trusted
+      return { x, y, i };
     }),
     med: data.medical.map((m) => {
       const [x, y] = proj(m.lat, m.lon);
@@ -943,6 +945,31 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
   /* One hit test for both hover and click: a pointerdown/up without a prior move
      (touch, or a scripted click) still lands on the right marker. */
+  /* Test hook: where a coordinate actually lands on screen. A marker drawn at the
+     wrong place is invisible in a screenshot; comparing this against the marker's own
+     bounding box is not. Kept tiny and read-only. */
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    (window as unknown as { __khz?: unknown }).__khz = {
+      screenOf: (lat: number, lon: number): [number, number] => {
+        const [x, y] = scene.proj(lat, lon);
+        const pt = svg.createSVGPoint();
+        pt.x = x;
+        pt.y = y;
+        /* The scene group carries translate+scale of its own; the SVG's matrix does
+           not include it, and using only that matrix reported every marker as
+           hundreds of pixels off — the test was wrong, not the map. */
+        const g = svg.querySelector("g#scene") as SVGGElement | null;
+        const m = g?.getScreenCTM();
+        if (!m) return [-1, -1];
+        const p = pt.matrixTransform(m);
+        return [p.x, p.y];
+      },
+      k: () => viewRef.current.k,
+    };
+  }, [scene, view.k]);
+
   const hitTest = (clientX: number, clientY: number) => {
     const [sx, sy, ratio] = toScene(clientX, clientY);
     /* Every layer competes on the same normalised distance, with a bonus for the
@@ -1087,11 +1114,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
        «+n». A lattice alone still let diagonal neighbours overlap. */
     const gapPx = px * 1.9;
     const gap = gapPx / view.k;
-    const buckets = new Map<string, { x: number; y: number; n: number }>();
-    const grid = new Map<string, { x: number; y: number; n: number }[]>();
+    const buckets = new Map<string, { x: number; y: number; n: number; i: number }>();
+    const grid = new Map<string, { x: number; y: number; n: number; i: number }[]>();
     const gkey = (x: number, y: number) => `${Math.floor(x * view.k / gapPx)}:${Math.floor(y * view.k / gapPx)}`;
     for (const p of scene.pharm) {
-      let host: { x: number; y: number; n: number } | null = null;
+      let host: { x: number; y: number; n: number; i: number } | null = null;
       const gx = Math.floor((p.x * view.k) / gapPx);
       const gy = Math.floor((p.y * view.k) / gapPx);
       for (let ox = -1; ox <= 1 && !host; ox++) {
@@ -1108,7 +1135,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         host.n += 1;
         continue;
       }
-      const item = { x: p.x, y: p.y, n: 1 };
+      const item = { x: p.x, y: p.y, n: 1, i: p.i };
       buckets.set(`${gx}:${gy}:${p.x.toFixed(3)}`, item);
       const list = grid.get(gkey(p.x, p.y));
       if (list) list.push(item);
@@ -1117,7 +1144,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     return (
       <g>
         {[...buckets.values()].map((b, i) => (
-          <g key={i}>
+          <g
+            key={i}
+            data-lat={data.pharmacies[b.i]?.lat}
+            data-lon={data.pharmacies[b.i]?.lon}
+            data-merged={b.n}
+          >
             <path
               d={`M${b.x} ${b.y - r} L${b.x + r} ${b.y} L${b.x} ${b.y + r} L${b.x - r} ${b.y}Z`}
               fill={COLORS.pharmacy}
@@ -1207,7 +1239,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           const hot = site.score >= 0.8;
           const fill = hot ? "#16a34a" : site.score >= 0.6 ? "#0d9488" : "#f59e0b";
           return (
-            <g key={site.rank}>
+            <g key={site.rank} data-lat={site.lat} data-lon={site.lon} data-rank={site.rank}>
               <circle cx={x} cy={y} r={9 / view.k} fill={fill} opacity={0.22} />
               <circle cx={x} cy={y} r={5.4 / view.k} fill={fill} stroke="#fff" strokeWidth={1.4 / view.k} />
               <text
@@ -2362,7 +2394,15 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                       className="flex w-full items-baseline justify-between gap-1 rounded px-1 py-0.5 text-right hover:bg-surface-2"
                     >
                       <span className="tnum w-4 text-faint">{site.rank}</span>
-                      <span className="flex-1 truncate text-ink-soft">{site.settlement ?? "—"}</span>
+                      <span className="flex-1 truncate text-ink-soft">
+                        {site.settlement ?? "—"}
+                        {site.settleKm > 0.15 ? (
+                          <span className="text-faint">
+                            {" "}
+                            {site.settleKm.toLocaleString("fa-IR", { maximumFractionDigits: 1 })}کم
+                          </span>
+                        ) : null}
+                      </span>
                       <span className="tnum text-[9.5px] text-muted">
                         {Math.round(site.demand / 1000)}k
                       </span>
@@ -2381,6 +2421,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 <div className="flex items-start justify-between gap-2">
                   <b className="text-[12px] text-ink">
                     پیشنهاد #{site.rank} · {site.settlement ?? "—"}
+                    {site.settleKm > 0.15 ? (
+                      <span className="font-normal text-muted">
+                        {" "}
+                        ({site.settleKm.toLocaleString("fa-IR", { maximumFractionDigits: 1 })} کم از مرکز)
+                      </span>
+                    ) : null}
                   </b>
                   <button
                     type="button"

@@ -186,21 +186,21 @@ def main() -> int:
     for s in settlements:
         set_bucket.add(s["lat"], s["lon"], s)
 
-    def access_of(lat: float, lon: float) -> tuple[float, float, str, str]:
+    def access_of(lat: float, lon: float) -> tuple[float, float, str, str, float]:
         best = None
         for _, _, s in set_bucket.near(lat, lon, 25.0):
             d = hav(lat, lon, s["lat"], s["lon"])
             if best is None or d < best[0]:
                 best = (d, s)
         if not best:
-            return 0.0, 0.0, "", ""
-        s = best[1]
+            return 0.0, 0.0, "", "", 0.0
+        d, s = best
         road = float(s["road_km"] or 0)
-        return 1 / (1 + road / 60), road, s["name"], s["county"] or ""
+        return 1 / (1 + road / 60), road, s["name"], s["county"] or "", d
 
     for cand in candidates:
-        cand["access"], cand["road_km"], cand["settlement"], cand["county"] = access_of(
-            cand["lat"], cand["lon"])
+        (cand["access"], cand["road_km"], cand["settlement"], cand["county"],
+         cand["settle_km"]) = access_of(cand["lat"], cand["lon"])
         # residents per accounted pharmacy: mapped + expected-but-unmapped
         supply = cand["supply_mapped"] + 0.85 * cand["supply_expected"]
         cand["gap"] = cand["demand"] / max(0.6, supply)
@@ -219,6 +219,19 @@ def main() -> int:
         cand["score"] = (0.45 * n_gap[i] + 0.25 * n_anchor[i]
                          + 0.15 * n_density[i] + 0.15 * n_access[i])
 
+    # Snap each candidate to the population peak of its own catchment. The score is
+    # computed for the area, but the pin has to stand where the houses are: a badge
+    # sitting in a field next to the town is what «the marker does not match» means.
+    for cand in candidates:
+        best = (0.0, cand["lat"], cand["lon"])
+        for pla, plo, pop in dem_bucket.near(cand["lat"], cand["lon"], 0.7):
+            if pop > best[0]:
+                best = (pop, pla, plo)
+        if best[0] > 0:
+            cand["lat"], cand["lon"] = best[1], best[2]
+            (cand["access"], cand["road_km"], cand["settlement"], cand["county"],
+             cand["settle_km"]) = access_of(cand["lat"], cand["lon"])
+
     candidates.sort(key=lambda d: -d["score"])
     # county cap: a list of ten اهواز districts is not a recommendation, it is a
     # restatement of where the people already are
@@ -236,10 +249,11 @@ def main() -> int:
         if len(kept) >= args.top:
             break
 
+    c.execute("DROP TABLE IF EXISTS site_candidate")
     c.execute("""CREATE TABLE IF NOT EXISTS site_candidate (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         rank INTEGER, score REAL, lat REAL, lon REAL,
-        settlement TEXT, county TEXT, demand REAL, demand_km2 REAL,
+        settlement TEXT, settle_km REAL, county TEXT, demand REAL, demand_km2 REAL,
         supply_mapped REAL, supply_expected REAL, anchors REAL, road_km REAL,
         gap REAL, reason TEXT,
         generated_at TEXT DEFAULT (datetime('now'))
@@ -252,11 +266,11 @@ def main() -> int:
             f"{cand['anchors']:.1f} امتیاز درمانی · {cand['road_km']:.0f} کم از اهواز"
         )
         c.execute("""INSERT INTO site_candidate
-            (rank, score, lat, lon, settlement, county, demand, demand_km2,
+            (rank, score, lat, lon, settlement, settle_km, county, demand, demand_km2,
              supply_mapped, supply_expected, anchors, road_km, gap, reason)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (i, round(cand["score"], 4), round(cand["lat"], 5), round(cand["lon"], 5),
-             cand["settlement"], cand["county"], round(cand["demand"]),
+             cand["settlement"], round(cand["settle_km"], 2), cand["county"], round(cand["demand"]),
              round(cand["density"], 1), cand["supply_mapped"],
              round(cand["supply_expected"], 1), round(cand["anchors"], 2),
              round(cand["road_km"], 1), round(cand["gap"], 1), reason))

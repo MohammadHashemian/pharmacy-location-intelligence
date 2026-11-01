@@ -371,6 +371,29 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Markers must sit on their own coordinate (`tools/test_marker_accuracy.py`)
+
+«The marker does not match the address» has two very different causes and they need
+different fixes:
+
+1. **geometry** — the marker is drawn somewhere other than its lat/lon. Every pharmacy and
+   every recommendation now carries `data-lat`/`data-lon`, and the map exposes
+   `__khz.screenOf(lat, lon)`; the test compares each drawn marker's centre against that
+   projection. Worst offset across three views: **0 px**.
+2. **labelling** — the recommendation is a *demand cell*, not a town centre, so a badge 4 km
+   from اهواز was captioned «اهواز». Candidates are now snapped to the **population peak of
+   their own catchment** (زرگان کرانه 0.02 km, کوی زیباشهر 1.16 km), and every label prints
+   the distance: «اهواز (۴٫۵ کم از مرکز)».
+
+```bash
+python tools/test_marker_accuracy.py --shots
+```
+
+The first version of this test reported offsets of 230–4,600 px and was wrong: it applied the
+SVG's screen matrix without the scene group's own `translate/scale`. Fixing the test is what
+turned «the map is broken» into «the map is correct» — worth writing down, because the next
+person will make the same mistake.
+
 ### Roads must exist at every zoom (`tools/test_roads_zoom.py`)
 
 Three layers can carry a road: `roads` (motorway…secondary, province-wide), `connectors`

@@ -181,6 +181,10 @@ export type SiteCandidate = {
   lat: number;
   lon: number;
   settlement: string | null;
+  /** Distance from this point to the settlement it is named after, km. The
+      recommendation is a demand cell, not a town centre — saying so avoids
+      «the marker is not where the name is». */
+  settleKm: number;
   county: string | null;
   demand: number;
   demandKm2: number;
@@ -394,15 +398,15 @@ export function loadMapData(): MapData {
   try {
     sites = all<{
       rank: number; score: number; lat: number; lon: number; settlement: string | null;
-      county: string | null; demand: number; demand_km2: number; supply_mapped: number;
+      settle_km: number; county: string | null; demand: number; demand_km2: number; supply_mapped: number;
       supply_expected: number; anchors: number; road_km: number; gap: number; reason: string;
     }>(
-      `SELECT rank, score, lat, lon, settlement, county, demand, demand_km2,
+      `SELECT rank, score, lat, lon, settlement, settle_km, county, demand, demand_km2,
               supply_mapped, supply_expected, anchors, road_km, gap, reason
          FROM site_candidate ORDER BY rank`,
     ).map((r) => ({
       rank: r.rank, score: r.score, lat: r.lat, lon: r.lon,
-      settlement: r.settlement, county: r.county, demand: r.demand,
+      settlement: r.settlement, settleKm: r.settle_km ?? 0, county: r.county, demand: r.demand,
       demandKm2: r.demand_km2, supplyMapped: r.supply_mapped,
       supplyExpected: r.supply_expected, anchors: r.anchors, roadKm: r.road_km,
       gap: r.gap, reason: r.reason,
