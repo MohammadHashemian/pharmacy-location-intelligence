@@ -264,12 +264,25 @@ def export_pharmacies(pts: list[dict]) -> list[tuple]:
               "etl/fetch_osm_pharmacies.py")
         return []
     payload = json.load(open(path, encoding="utf-8"))
-    rows, feats = [], []
+    outline_path = os.path.join(OUT_GEO, "khuzestan_outline.geojson")
+    outline = []
+    if os.path.exists(outline_path):
+        fc = json.load(open(outline_path, encoding="utf-8"))
+        for poly in fc["features"][0]["geometry"]["coordinates"]:
+            for ring in poly:
+                outline.append([(p[0], p[1]) for p in ring])
+    rows, feats, outside = [], [], 0
     for el in payload["elements"]:
         t = el.get("tags") or {}
         lat = el.get("lat") or (el.get("center") or {}).get("lat")
         lon = el.get("lon") or (el.get("center") or {}).get("lon")
         if lat is None or lon is None:
+            continue
+        # The Overpass bbox includes a slice of Iraq and Kuwait; a pharmacy
+        # across the border would land in خرمشهر county and inflate its count
+        # (113 of 223 points were exactly that).
+        if outline and not any(_inside(r, lon, lat) for r in outline):
+            outside += 1
             continue
         best_i, best_d = None, 1e9
         for p in pts:
@@ -305,6 +318,8 @@ def export_pharmacies(pts: list[dict]) -> list[tuple]:
     json.dump(fc, open(out, "w", encoding="utf-8"), ensure_ascii=False,
               separators=(",", ":"))
     matched = sum(1 for r in rows if r[7] is not None and r[7] <= 3.0)
+    if outside:
+        print(f"  pharmacies: {outside} points outside the province outline dropped")
     print(f"  khuzestan_pharmacies.geojson: {len(feats):,} points · "
           f"{matched:,} within 3 km of a settlement · "
           f"{os.path.getsize(out)/1024:.0f} KB")
