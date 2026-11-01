@@ -21,10 +21,12 @@ OUT = os.path.join(HOME, "data", "raw", "osm", "khuzestan_pharmacies.json")
 URL = "https://overpass-api.de/api/interpreter"
 UA = {"User-Agent": "pharmacy-location-intelligence/1.0 (research; site selection)"}
 QUERY = """
-[out:json][timeout:120];
+[out:json][timeout:180];
 (
-  node["amenity"="pharmacy"](29.9,47.6,33.1,50.4);
-  way["amenity"="pharmacy"](29.9,47.6,33.1,50.4);
+  nwr["amenity"="pharmacy"](29.9,47.6,33.1,50.4);
+  nwr["healthcare"="pharmacy"](29.9,47.6,33.1,50.4);
+  nwr["shop"="chemist"](29.9,47.6,33.1,50.4);
+  nwr["shop"="pharmacy"](29.9,47.6,33.1,50.4);
 );
 out center tags;
 """
