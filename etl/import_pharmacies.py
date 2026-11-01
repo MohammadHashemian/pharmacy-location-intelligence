@@ -326,6 +326,11 @@ def main() -> int:
     ap.add_argument("--radius", type=int, default=1500, help="neshan nearby radius, m")
     ap.add_argument("--radius-km", type=float, default=20.0, help="google text-search bias")
     ap.add_argument("--pages", type=int, default=3, help="google: pages of 20 per centre")
+    ap.add_argument("--grid-km", type=float, default=0.0,
+                    help="google: search a grid of this spacing inside each city "
+                         "instead of one 20 km bias circle. A circle returns the 60 "
+                         "best matches, which is why اهواز had 90 of its ~340 pharmacies")
+    ap.add_argument("--city", default=None, help="only this city")
     ap.add_argument("--service", choices=["nearby", "search"], default=None)
     ap.add_argument("--min-pop", type=int, default=0,
                     help="also query at villages with at least this population")
@@ -369,6 +374,35 @@ def main() -> int:
             ORDER BY COALESCE(a.population, 0) DESC
         """, (args.min_pop,)).fetchall()
         centres += [(n, la, lo) for n, la, lo in villages]
+
+    if args.city:
+        centres = [c for c in centres if c[0] == args.city]
+
+    if args.grid_km > 0:
+        pop_by_name = {r[0]: (r[1] or 0) for r in c.execute("""
+            SELECT a.name, COALESCE(a.population, 0) FROM v_admin_area_current a
+            WHERE a.kind IN ('city', 'village')""")}
+        step = args.grid_km
+        dlat = step / 110.57
+        grid: list[tuple[str, float, float]] = []
+        for name, la, lo in centres:
+            pop = pop_by_name.get(name, 0)
+            r_km = max(2.0, min(14.0, 0.9 * (pop / 1000) ** 0.5))
+            n = int(r_km / step) + 1
+            dlon = step / (111.32 * math.cos(math.radians(la)))
+            cells = 0
+            for i in range(-n, n + 1):
+                for j in range(-n, n + 1):
+                    dla, dlo = i * dlat, j * dlon
+                    if (dla * 110.57) ** 2 + (dlo * 111.32 * math.cos(math.radians(la))) ** 2 > r_km ** 2:
+                        continue
+                    grid.append((name, round(la + dla, 5), round(lo + dlo, 5)))
+                    cells += 1
+            if cells:
+                print(f"grid: {name} → {cells} centres of {step:g} km")
+        centres = grid
+        if args.pages > 1:
+            args.pages = min(args.pages, 2)
 
     if args.limit:
         centres = centres[: args.limit]
@@ -419,14 +453,16 @@ def main() -> int:
         print(f"google: {len(centres)} centres · up to {args.pages} pages of 20 each")
         codes: dict[int, int] = {}
         for i, (name, la, lo) in enumerate(centres, 1):
-            if name in cache:
-                raw_points.extend(cache[name])
+            ck = name if args.grid_km <= 0 else f"{name}|{la:.4f},{lo:.4f}"
+            if ck in cache:
+                raw_points.extend(cache[ck])
                 continue
             token, page = None, 0
             here: list[dict] = []
             while page < args.pages:
                 code, places, token, detail = call_google(
-                    key, args.term, la, lo, int(args.radius_km * 1000), token)
+                    key, args.term, la, lo,
+                    int((args.grid_km or args.radius_km) * 1000), token)
                 codes[code] = codes.get(code, 0) + 1
                 calls += 1
                 if code != 200:

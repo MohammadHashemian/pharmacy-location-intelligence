@@ -384,6 +384,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     osm: true,
     med: true,
     streets: true,
+    sat: false,
   });
   const [targetPerPharm, setTargetPerPharm] = useState(
     Math.round((data.meta.residentsPerPharmacy || 5400) / 100) * 100,
@@ -903,7 +904,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     /* Every layer competes on the same normalised distance, with a bonus for the
        specific markers: clicking a pharmacy that sits inside a town used to open
        the town instead, because the settlement test ran first and won at 9 px. */
-    const tolS = 9 / ratio;
+    /* A settlement's own symbol is 1.2–3.7 px, so a 9 px catch area made the
+       neighbouring village win the hover and show the wrong name. 6 px is one
+       finger-width on a phone and one pixel of intent with a mouse. */
+    const tolS = 6 / ratio;
     const pharmPx = pharmRadiusPx(view.k);
     const tolP = Math.max(9, pharmPx + 5) / ratio;
     const medPx = medRadiusPx(view.k);
@@ -1433,6 +1437,55 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     return { cells: out, max: maxV, cap, stepKm, dLat, dLon };
   }, [settled, scene, settlements, mode, targetPerPharm, supply, popCells, popProvince]);
 
+  /* Satellite base. Hand-rolled like the rest of the map: no map library, so the
+     visible scene box is inverted to lat/lon, the Esri World Imagery zoom that puts
+     ~3 tiles across that box is picked, and each tile is projected to the rectangle
+     its corners fall on. The imagery is Mercator, the scene is equirectangular, so a
+     tile is stretched inside its box (`preserveAspectRatio="none"`) — the error is
+     sub-pixel at city zoom and a few pixels at province zoom, where the raster is
+     context rather than evidence. Attribution stays on screen: Esri's terms require
+     it, and a hidden credit is the same as no credit. */
+  const satTiles = useMemo(() => {
+    if (!layers.sat) return null;
+    const k = view.k;
+    const [latN, lonW] = scene.inv(-view.tx / k, -view.ty / k);
+    const [latS, lonE] = scene.inv((W - view.tx) / k, (H - view.ty) / k);
+    const lonSpan = Math.max(1e-6, Math.abs(lonE - lonW));
+    /* Pick the zoom whose native resolution matches the screen, not "a few tiles
+       across": one level short upsampled the image ~4x and the city read as flat
+       desert. 256 px of tile per 360/2^z degrees, so z = log2(pxPerDeg*360/256). */
+    const pxPerDeg = (svgRef.current?.clientWidth || W) / lonSpan;
+    const z = Math.max(7, Math.min(17, Math.round(Math.log2((pxPerDeg * 360) / 256))));
+    const n = 2 ** z;
+    const yOf = (lat: number) =>
+      (1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) /
+        Math.PI) / 2;
+    const lonOf = (x: number) => (x / n) * 360 - 180;
+    const latOf = (y: number) => (180 / Math.PI) * Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / n)));
+    const tx0 = Math.floor(((lonW + 180) / 360) * n);
+    const tx1 = Math.floor(((lonE + 180) / 360) * n);
+    const ty0 = Math.floor(yOf(latN) * n);
+    const ty1 = Math.floor(yOf(latS) * n);
+    const out: { key: string; href: string; x: number; y: number; w: number; h: number }[] = [];
+    for (let ty = ty0; ty <= ty1 && out.length < 64; ty++) {
+      if (ty < 0 || ty >= n) continue;
+      for (let tx = tx0; tx <= tx1 && out.length < 64; tx++) {
+        const wrap = ((tx % n) + n) % n;
+        const [ax, ay] = scene.proj(latOf(ty), lonOf(tx));
+        const [bx, by] = scene.proj(latOf(ty + 1), lonOf(tx + 1));
+        out.push({
+          key: `${z}/${ty}/${wrap}`,
+          href: `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${wrap}`,
+          x: ax,
+          y: ay,
+          w: bx - ax,
+          h: by - ay,
+        });
+      }
+    }
+    return { z, tiles: out };
+  }, [layers.sat, view.k, view.tx, view.ty, scene]);
+
   /* Roads: culled to the viewport and to the class the zoom level needs, then
      concatenated into two paths — 8k <path> nodes would choke the renderer. */
   const roadLayer = useMemo(() => {
@@ -1483,10 +1536,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           <path
             key={`b${i}`}
             d={b.d}
-            fill="#dfe8f3"
-            fillOpacity={0.96}
-            stroke="#8b9bb2"
+            /* the vector land colour would bury the imagery; with satellite on the
+               shape still has to exist (it is the clip path), just not paint */
+            fill={layers.sat ? "#ffffff" : "#dfe8f3"}
+            fillOpacity={layers.sat ? 0 : 0.96}
+            stroke={layers.sat ? "#ffffff" : "#8b9bb2"}
             strokeWidth={0.7}
+            strokeOpacity={layers.sat ? 0.5 : 1}
           />
         ))}
         {scene.dehestan.map((d, i) => (
@@ -1509,7 +1565,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         />
       </g>
     ),
-    [scene],
+    [scene, layers.sat],
   );
 
   const labelLayer = useMemo(() => {
@@ -1795,6 +1851,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     ["streets", "خیابان‌ها"],
                     ["med", "خدمات درمانی"],
                     ["osm", "داروخانه‌های نقشه"],
+                    ["sat", "تصویر ماهواره‌ای"],
                   ] as const
                 ).map(([id, label]) => (
                   <label
@@ -1906,6 +1963,22 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               id="scene"
               transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}
             >
+              {satTiles ? (
+                <g clipPath="url(#provClip)">
+                  {satTiles.tiles.map((t) => (
+                    <image
+                      key={t.key}
+                      href={t.href}
+                      x={t.x}
+                      y={t.y}
+                      width={t.w}
+                      height={t.h}
+                      preserveAspectRatio="none"
+                      style={{ imageRendering: "auto" }}
+                    />
+                  ))}
+                </g>
+              ) : null}
               {layers.admin ? adminLayer : null}
               {roadLayer}
               {layers.density && view.k < 1.2 ? cellLayer : null}
@@ -1923,7 +1996,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                          with no mapped supply, teal = supply, nothing = no data. */
                       fill={
                         mode === "dens" && c.v <= 0
-                          ? "#e2e8f0"
+                          ? layers.sat
+                            ? "none"
+                            : "#e2e8f0"
                           : ramp(
                               mode === "dens"
                                 ? DENS_RAMP
@@ -1934,10 +2009,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                             )
                       }
                       fillOpacity={
+                        /* on imagery the grey «no supply» wash covered exactly the
+                           built-up blocks the photo was opened to show */
                         mode === "dens" && c.v <= 0
-                          ? 0.45
-                          : (view.k >= 4.5 ? 0.17 : 0.35) +
-                            0.45 * Math.min(1, c.v / fineCells.cap)
+                          ? 0
+                          : ((view.k >= 4.5 ? 0.17 : 0.35) +
+                              0.45 * Math.min(1, c.v / fineCells.cap)) *
+                            (layers.sat ? 0.8 : 1)
                       }
                     />
                   ))}
@@ -2058,6 +2136,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             </g>
 
           </svg>
+          {layers.sat ? (
+            <div className="pointer-events-none absolute bottom-1 left-2 z-10 rounded bg-white/85 px-1.5 py-0.5 text-[9.5px] text-[#334155] shadow-sm">
+              تصویر: Esri · Maxar · Earthstar Geographics
+            </div>
+          ) : null}
 
           {/* zoom + legend */}
           <div className="absolute left-2 top-2 flex flex-col gap-1">
@@ -2090,7 +2173,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     (hoverMed.x ?? 0) + 14,
                   ),
                 ),
-                top: Math.max(4, Math.min((hoverMed.y ?? 0) + 12, 300)),
+                top: Math.max(
+                  4,
+                  Math.min(
+                    (hoverMed.y ?? 0) + 12,
+                    (svgRef.current?.clientHeight ?? 400) - 78,
+                  ),
+                ),
               }}
             >
               <div className="flex items-baseline justify-between gap-1">
@@ -2120,7 +2209,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     (hoverPharm.x ?? 0) + 14,
                   ),
                 ),
-                top: Math.max(4, Math.min((hoverPharm.y ?? 0) + 12, 300)),
+                top: Math.max(
+                  4,
+                  Math.min(
+                    (hoverPharm.y ?? 0) + 12,
+                    (svgRef.current?.clientHeight ?? 400) - 92,
+                  ),
+                ),
               }}
             >
               <div className="flex items-baseline justify-between gap-1">

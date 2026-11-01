@@ -328,6 +328,35 @@ and never double-counted:
 Every settlement tooltip/card shows the split — جمعیت, داروخانه (FDA), نقشهشده,
 بدون موقعیت — and the header chip reads «۸۹۴ داروخانه در فید سازمان · ۴۱۹ روی نقشه».
 
+### Satellite base (`layers.sat`)
+
+The map is hand-rolled SVG, so the imagery is too: the visible scene box is inverted
+to lat/lon, the Esri World Imagery zoom whose native resolution matches the screen is
+picked (`z = log2(pxPerDeg · 360 / 256)`), and each tile is projected to the rectangle
+its corners fall on. 64 tiles maximum, clipped to the province outline.
+
+* attribution «تصویر: Esri · Maxar · Earthstar Geographics» stays on screen — the
+  provider's terms require it and a hidden credit is no credit;
+* with imagery on, the vector land fill, the grey «no supply» density wash and the
+  boundary strokes step back so the photo is readable — they were covering exactly the
+  built-up blocks the layer was switched on to show.
+
+### Why pharmacies were missing from the map
+
+`--provider google` searched **one 20 km bias circle per city and stopped at 3 pages
+(60 results)**. اهواز has ~340 pharmacies in the FDA feed and 90 on the map: the cap,
+not the city, decided what was found. `داروخانه سجادی` (31.27783, 48.61470) is in
+Google, is typed `pharmacy`, and was simply past result 60.
+
+```bash
+python etl/import_pharmacies.py --provider google --grid-km 2 --pages 2   # every city
+python etl/import_pharmacies.py --provider google --city اهواز --grid-km 2 --pages 2
+```
+
+`--grid-km` replaces the circle with a grid of centres inside each city's built-up
+radius, `--pages 2` per centre, and the cache key becomes the **centre**, not the city
+— without that, the first cell's answer was reused for the whole city.
+
 ### Secrets: what is in the repo, and the check that keeps it that way
 
 Keys live **only** in `db/pharmacy.sqlite` (`app_setting`), which is git-ignored, and the
