@@ -718,12 +718,17 @@ layers are kept, never merged:
 python etl/fetch_osm_pharmacies.py   # Overpass, cached in data/raw/osm/
 ```
 
-**Coverage is the honest part:** OSM has **223** pharmacies in خوزستان against the
-**884** the FDA counts — roughly a quarter, concentrated in the well-mapped cities
-(اهواز 10, ماهشهر 7, دزفول 7, باغملک 6 …). The layer is therefore labelled
+**Coverage is the honest part:** OSM has **108** pharmacies in خوزستان against the
+**884** the FDA counts — 12%, concentrated in the well-mapped cities (اهواز 20,
+دزفول 17, ماهشهر 15, باغملک 10 …). The layer is therefore labelled
 «داروخانههای نقشه» and never presented as the complete set. A few OSM entries are
 mislabelled institutions («شبکه بهداشت شیبان» tagged as a pharmacy), which is why
 the popup shows the raw OSM name.
+
+The Overpass bbox reaches into Iraq and Kuwait: **115 of the 223** points returned
+sat across the border (Umm Qasr, Basra) and would have made خرمشهر the densest
+pharmacy county in the province. Points are filtered by the province outline
+before they reach the database.
 
 To complete it, the same pipeline accepts any point-of-interest source — Google
 Places (`places:searchNearby`, needs a billing key, ~$10 for the province), Neshan
