@@ -29,46 +29,61 @@ export async function POST(req: Request) {
   const timeout = AbortSignal.timeout(20_000);
   try {
     if (key === "neshan_api_key") {
-      // Neshan's current Search API: /v3/search with a JSON `q` (docs, 1404).
-      // /v1/search is retired and answers 485 for a key scoped to another service.
+      // A Neshan key is bound to the service picked when it was created, so probe
+      // both point services: nearby (location+radius) first, then search
+      // (term+center). /v1/search is retired; its error 485 means "wrong service".
       const q = JSON.stringify({
         term: "داروخانه",
         center: { latitude: AHVAZ.lat, longitude: AHVAZ.lon },
       });
-      const url = `https://api.neshan.org/v3/search?q=${encodeURIComponent(q)}`;
-      const r = await fetch(url, { headers: { "Api-Key": value }, signal: timeout });
-      const text = await r.text();
-      if (!r.ok) {
-        return NextResponse.json(
-          {
-            ok: false,
-            status: r.status,
-            error:
-              r.status === 485
-                ? "این کلید سرویس «جستجو» ندارد (485). در پنل نشان کلیدی با سرویس Search بسازید؛ فعال‌سازی جستجو با تیکت پشتیبانی انجام می‌شود."
-                : r.status === 480 || r.status === 401 || r.status === 403
-                  ? "کلید پذیرفته نشد — کلید سرویس را بررسی کنید"
-                  : r.status === 481 || r.status === 482
-                    ? "سهمیهٔ درخواست نشان تمام شده (۴۸۱/۴۸۲)"
-                    : `نشان پاسخ ${r.status} داد`,
-            detail: text.slice(0, 300),
-          },
-          { status: 200 },
-        );
+      const tries: { name: string; url: string }[] = [
+        {
+          name: "مکان‌های نزدیک /v1/nearby",
+          url: `https://api.neshan.org/v1/nearby?location=${AHVAZ.lat},${AHVAZ.lon}&radius=1500`,
+        },
+        {
+          name: "جستجو /v3/search",
+          url: `https://api.neshan.org/v3/search?q=${encodeURIComponent(q)}`,
+        },
+      ];
+      let last = { status: 0, text: "" };
+      for (const t of tries) {
+        const r = await fetch(t.url, { headers: { "Api-Key": value }, signal: timeout });
+        const text = await r.text();
+        if (r.ok) {
+          const json = JSON.parse(text) as {
+            count?: number;
+            items?: { title?: string; address?: string; type?: string; category?: string }[];
+          };
+          return NextResponse.json({
+            ok: true,
+            provider: `نشان — ${t.name}`,
+            found: json.count ?? json.items?.length ?? 0,
+            sample: (json.items ?? []).slice(0, 4).map((i) => ({
+              title: i.title ?? "",
+              address: [i.address, i.type].filter(Boolean).join(" · "),
+            })),
+          });
+        }
+        last = { status: r.status, text };
+        if ([401, 403, 480].includes(r.status)) break; // the key itself is bad
       }
-      const json = JSON.parse(text) as {
-        count?: number;
-        items?: { title?: string; address?: string; type?: string; category?: string }[];
-      };
-      return NextResponse.json({
-        ok: true,
-        provider: "نشان (Search /v3)",
-        found: json.count ?? json.items?.length ?? 0,
-        sample: (json.items ?? []).slice(0, 4).map((i) => ({
-          title: i.title ?? "",
-          address: [i.address, i.type].filter(Boolean).join(" · "),
-        })),
-      });
+      return NextResponse.json(
+        {
+          ok: false,
+          status: last.status,
+          error:
+            last.status === 485
+              ? "این کلید سرویس مکانیابی ندارد (485). در پنل نشان کلیدی با سرویس «مکانهای نزدیک» یا «جستجو» بسازید؛ فعالسازی با تیکت پشتیبانی انجام میشود."
+              : last.status === 480 || last.status === 401 || last.status === 403
+                ? "کلید پذیرفته نشد — کلید سرویس را بررسی کنید"
+                : last.status === 481 || last.status === 482
+                  ? "سهمیهٔ درخواست نشان تمام شده (۴۸۱/۴۸۲)"
+                  : `نشان پاسخ ${last.status} داد`,
+          detail: last.text.slice(0, 300),
+        },
+        { status: 200 },
+      );
     }
 
     // Google Places (New) — nearby search around اهواز, type pharmacy

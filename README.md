@@ -949,6 +949,15 @@ results per request**, ordered by distance from the centre and with no paging â€
 a province-wide import is a grid of search centres, deduped afterwards.
 `/v1/search` and `/v4/search` are retired (485 / 404).
 
+Two point services exist and a key is bound to the one chosen at creation, so the
+importer probes **both** and uses whichever answers:
+
+```bash
+python etl/import_pharmacies.py --check     # prints "nearby" or "search", or the 485 fix
+python etl/import_pharmacies.py --fixture data/sample/neshan.json   # offline pipeline
+python etl/verify_import.py                 # 21 assertions, no network
+```
+
 Errors seen in practice and what they mean:
 
 | code | meaning | fix |
