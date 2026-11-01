@@ -54,9 +54,11 @@ def mask_km(pop: float) -> float:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cell-km", type=float, default=1.0)
-    ap.add_argument("--poi-boost", type=float, default=0.6,
-                    help="weight added per mapped POI on a cell, relative to the kernel")
+    ap.add_argument("--cell-km", type=float, default=0.5)
+    ap.add_argument("--poi-boost", type=float, default=0.15,
+                    help="weight added per mapped POI, when no street raster covers the cell")
+    ap.add_argument("--street-floor", type=float, default=40.0,
+                    help="metres of street credited to a cell with none mapped, times (1-d/r)^2")
     args = ap.parse_args()
 
     c = sqlite3.connect(DB)
@@ -68,26 +70,29 @@ def main() -> int:
     pois = [(r["lat"], r["lon"]) for r in c.execute(
         "SELECT lat, lon FROM map_pharmacy UNION ALL SELECT lat, lon FROM map_medical")]
 
-    # Cities that already have the finer 250 m surface: their ground is not rebuilt
-    # here, so the two files never describe the same cell.
-    covered: list[tuple[float, float, float]] = []
-    for row in c.execute("""
-        SELECT city, AVG(lat) AS la, AVG(lon) AS lo,
-               MAX(ABS(lat - (SELECT AVG(lat) FROM urban_cell WHERE city = u.city))) AS dla
-        FROM urban_cell u GROUP BY city
-    """):
-        pass
-    # radius from the actual cell extents (the sub-select above is awkward in SQLite,
-    # so it is done in python where it is readable)
-    cells_by_city: dict[str, list[tuple[float, float]]] = {}
-    for r in c.execute("SELECT city, lat, lon FROM urban_cell"):
-        cells_by_city.setdefault(r["city"], []).append((r["lat"], r["lon"]))
-    for city, pts in cells_by_city.items():
-        cla = sum(p[0] for p in pts) / len(pts)
-        clo = sum(p[1] for p in pts) / len(pts)
-        rad = max(hav(cla, clo, a, b) for a, b in pts) * 1.05
-        covered.append((cla, clo, rad))
-    print(f"covered by the fine surface: {[(round(a,3), round(b,3), round(r,1)) for a,b,r in covered]}")
+    # Ground already described by the finer 250 m surface is skipped *cell by cell*
+    # (not by disc). A disc test looked right and was disastrous: 86 cities × the
+    # 12 km street radius covers 39,000 km² of a 68,000 km² province, which left 9 %
+    # of the population to place.
+    fine_cells: set[tuple[int, int]] = set()
+    if os.path.exists(URBAN):
+        u = json.load(open(URBAN, encoding="utf-8"))
+        for la, lo, *_ in u.get("cells", []):
+            fine_cells.add((round(la / 0.05), round(lo / 0.05)))
+        print(f"finer surface owns {len(fine_cells):,} cells "
+              f"({len(u.get('cities', []))} cities)")
+
+    raster: dict[tuple[int, int], float] = {}
+    raster_path = os.path.join(HOME, "data", "derived", "street_raster.json")
+    if os.path.exists(raster_path):
+        raw = json.load(open(raster_path, encoding="utf-8"))
+        rcell = float(raw.get("cell_km", 0.5)) / args.cell_km
+        for la, lo, m in raw["cells"]:
+            raster[(round(la / (0.5 / 110.57)), round(lo / (0.5 / 111.0)))] = m
+        print(f"street raster: {len(raster):,} cells at {raw.get('cell_km')} km, "
+              f"scaled to {args.cell_km} km grid (factor {rcell:.2f})")
+    else:
+        print("no street raster — falling back to the kernel + POI weights")
 
     step = args.cell_km
     lats = [s["lat"] for s in settlements]
@@ -126,11 +131,28 @@ def main() -> int:
                 d = hav(s["lat"], s["lon"], la, lo)
                 if d > r:
                     continue
-                if any(hav(la, lo, cla, clo) < cr * 1.02 for cla, clo, cr in covered if cr > 0):
+                if (round(la / 0.05), round(lo / 0.05)) in fine_cells:
                     skipped_covered += 1
                     continue
                 kernel = (1 - d / r) ** 2
-                w = kernel + args.poi_boost * poi_cells.get((i, j), 0)
+                # 500 m raster lookup (average of the sub-cells under this one)
+                metres = 0.0
+                if raster:
+                    sub = 0
+                    got = 0
+                    for si in range(2):
+                        for sj in range(2):
+                            key_r = (round((la + (si - 0.5) * step / 2) / (0.5 / 110.57)),
+                                     round((lo + (sj - 0.5) * step / 2) / (0.5 / 111.0)))
+                            m = raster.get(key_r)
+                            if m:
+                                got += 1
+                                sub += m
+                    metres = sub / got if got else 0.0
+                if metres > 0:
+                    w = metres + args.street_floor * kernel
+                else:
+                    w = args.street_floor * kernel + args.poi_boost * 10 * poi_cells.get((i, j), 0)
                 if w <= 0:
                     continue
                 cells.append(((i, j), w))
@@ -147,7 +169,7 @@ def main() -> int:
         "generated_by": "etl/build_pop_province.py",
         "cell_km": step,
         "method": "census population per settlement spread over its built-up disc by "
-                  "(1-d/r)^2 kernel + mapped POIs per cell",
+                  "OSM street metres per cell (fallback: (1-d/r)^2 kernel + POIs)",
         "settlements": len(settlements),
         "population": round(total),
         "assigned": round(assigned),

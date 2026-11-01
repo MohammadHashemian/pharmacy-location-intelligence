@@ -354,6 +354,31 @@ python etl/reclassify_places.py            # report what the stored rows really 
 python etl/reclassify_places.py --apply    # delete the wrong, re-kind, move doctors out of the pharmacy layer
 ```
 
+### Streets for all 86 cities (`etl/fetch_province_streets.py`)
+
+`fetch_urban_detail.py` asks Overpass once per city, which is fine for one city and
+hopeless for a hundred: the public mirrors rate-limit within seconds (`osm.ch` is a
+Swiss extract and answers every Iranian bbox with an empty 200; `kumi` and
+`private.coffee` time out; `overpass-api.de` is the only reliable one, at ~45 s a
+query). A hundred sequential queries is six hours for data that is one query away.
+
+```bash
+python etl/fetch_province_streets.py --fetch   # 16 tiles, ~15 min, resumable
+python etl/fetch_province_streets.py --split   # tiles → per-city files + cells
+```
+
+Sixteen boxes cover خوزستان; each way is simplified (~9 m) and handed to **every**
+city whose radius contains it (nearest-only starved small towns). Output:
+
+* `web/public/geo/streets_<slug>.json` for **86 cities** — 49,565 segments, 8.9 MB,
+  drawn above 4.5×;
+* `urban_cell(lat, lon, street_m)` per city — the weight for the 250 m surface;
+* `data/derived/street_raster.json` — 500 m street metres for the **whole province**,
+  206 k cells, which is what gives villages a real footprint instead of a kernel guess.
+
+Cities with no OSM residential coverage stay out of the index; the map falls back to
+the 1 km surface there, so nothing renders as empty.
+
 ### Population surface for the whole province (`etl/build_pop_province.py`)
 
 The 250 m `urban_pop.json` needs a city's street network, so it only exists for the
@@ -361,22 +386,22 @@ cities fetched so far (اهواز). Everything else knew «settlement X holds N 
 this one point», which is what the per-pharmacy ratio looked like it ignored outside
 اهواز.
 
-`build_pop_province.py` spreads every settlement's census population over a 1 km
+`build_pop_province.py` spreads every settlement's census population over a 0.5 km
 grid, weighting each cell by
 
-* `(1 - d/r)^2` inside the settlement's built-up radius `r` (2.5–12 km, same rule
-  as the map's residential mask),
-* **+0.6 per mapped POI** on the cell — a pharmacy or clinic does not stand in a
-  field, so those cells are built-up by definition,
-* and never inside a city already covered by the finer 250 m surface.
+* **OSM street metres on the cell** (from `street_raster.json`), which is what
+  actually follows a village's shape,
+* `40 m × (1 - d/r)^2` as the floor inside the settlement's built-up radius `r`
+  (2.5–12 km, the same rule as the residential mask) and +1.5 per mapped POI,
+* and never on a cell the finer 250 m surface already owns.
 
 ```bash
 python etl/build_pop_province.py          # → web/public/geo/pop_province.json
 python etl/build_pop_province.py --cell-km 0.5
 ```
 
-Result: **23,152 cells at 1 km, 3.45 M of 4.78 M people placed** (the remaining 1.33 M
-is the اهواز disc, which the 250 m file owns). The map loads both and sums whichever
+Result: **31,725 cells at 0.5 km, 3.72 M of 4.78 M people placed**; the other 1.06 M
+lives on cells the 250 m file owns (all 86 surveyed cities). The map loads both and sums whichever
 covers a cell, so «نفر به ازای داروخانه» now paints from the province view down to a
 village's outskirts.
 

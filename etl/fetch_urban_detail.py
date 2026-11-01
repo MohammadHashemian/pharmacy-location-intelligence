@@ -42,10 +42,13 @@ DB = os.path.join(HOME, "db", "pharmacy.sqlite")
 GEO = os.path.join(HOME, "web", "public", "geo")
 CACHE = os.path.join(HOME, "data", "derived", "urban")
 UA = {"User-Agent": "pharmacy-location-intelligence/1.0 (research; site selection)"}
+# measured 2026-11: overpass-api.de 502 / kumi + private.coffee time out;
+# osm.ch answers in ~1 s. Slow mirrors are kept as fallbacks, last.
 HOSTS = [
-    "https://overpass.private.coffee/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.osm.ch/api/interpreter",
     "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
 ]
 STREET_CLASSES = "tertiary|residential|unclassified|living_street"
 CELL_KM = 0.25            # grid the buildings are counted on
@@ -267,7 +270,12 @@ def main() -> int:
         if not args.buildings_only and "streets" not in cache:
             print(f"[{i}/{len(cities)}] {name}: streets inside {skm:.1f} km …", flush=True)
             try:
-                cache["streets"] = fetch_streets(lat, lon, skm)
+                got = fetch_streets(lat, lon, skm)
+                if not got:
+                    # a mirror can answer with an empty/HTML body; never cache that,
+                    # otherwise the city is «done» for good and never retried
+                    raise RuntimeError("empty answer")
+                cache["streets"] = got
                 json.dump(cache, open(cache_file, "w", encoding="utf-8"), ensure_ascii=False)
                 print(f"    {len(cache['streets']):,} street segments", flush=True)
             except Exception as e:  # noqa: BLE001
