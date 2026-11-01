@@ -42,6 +42,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from classify_poi import as_pharmacy
+
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(HOME, "db", "pharmacy.sqlite")
 OUT_GEO = os.path.join(HOME, "web", "public", "geo")
@@ -196,8 +198,8 @@ def item_to_point(it: dict) -> dict | None:
     if x is None or y is None:
         return None
     lat, lon = float(y), float(x)
-    if not looks_like_pharmacy(str(it.get("title") or ""), str(it.get("type") or ""),
-                               str(it.get("category") or "")):
+    if not as_pharmacy(str(it.get("title") or ""),
+                       [str(it.get("type") or ""), str(it.get("category") or "")]):
         return None
     if not inside_outline(lat, lon):
         return None
@@ -279,10 +281,9 @@ def google_item_to_point(pl: dict) -> dict | None:
     if pl.get("businessStatus") == "CLOSED_PERMANENTLY":
         return None
     name = ((pl.get("displayName") or {}).get("text") or "").strip()
-    types = " ".join(pl.get("types") or []).lower()
-    # Same rule as the Neshan side: a name hit is not enough, because «خیابان
-    # داروخانه» is typed «route» and a hospital carries its own types.
-    if not looks_like_pharmacy(name, types, ""):
+    # The shared classifier: negatives first (a cosmetics shop named «آرایشی» must
+    # not pass on a pharmacy type), then the name, then the types.
+    if not as_pharmacy(name, [str(t) for t in (pl.get("types") or [])]):
         return None
     if not inside_outline(float(lat), float(lon)):
         return None

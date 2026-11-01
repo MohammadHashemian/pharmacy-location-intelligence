@@ -328,6 +328,32 @@ and never double-counted:
 Every settlement tooltip/card shows the split — جمعیت, داروخانه (FDA), نقشهشده,
 بدون موقعیت — and the header chip reads «۸۹۴ داروخانه در فید سازمان · ۴۱۹ روی نقشه».
 
+### What counts as a pharmacy or a clinic (`etl/classify_poi.py`)
+
+Google's `types` are not trustworthy in Iran: a tire shop came back as
+`medical_clinic` and a bag shop as `pharmacy`. Every importer now asks one
+classifier, which weighs evidence in this order:
+
+1. hard negative **type** — `tire_repair`, `car_repair`, `supermarket`, `bank`,
+   `street`, `locality` … nothing rescues those;
+2. hard negative **name** — پنچر, لاستیک, آرایشگاه, عطاری, تجهیزات پزشکی,
+   کالای دندانپزشکی … (whole-word for short tokens, so «مهد» does not fire inside
+   «مهدی پور» and «فرش» not inside «فرشته»);
+3. positive **name** — بیمارستان › دندانپزشک › آزمایشگاه › درمانگاه/کلینیک ›
+   پزشک/مطب › داروخانه, most specific first;
+4. **types** when the name is neutral («دکتر رضایی» vs «رضایی»);
+5. the query role, as a weak last resort. Everything else stays `unknown` and is
+   not mapped.
+
+Strong medical words beat a weak negative (`کلینیک … بیمه تامین اجتماعی` is a clinic
+that belongs to an insurer), but never a hard one (`تجهیزات پزشکی` stays out).
+
+```bash
+python etl/verify_classifier.py            # 42 fixtures + a live audit
+python etl/reclassify_places.py            # report what the stored rows really are
+python etl/reclassify_places.py --apply    # delete the wrong, re-kind, move doctors out of the pharmacy layer
+```
+
 ### Urban detail: streets and a population surface
 
 The province layer knows where people live to the settlement, which is too coarse

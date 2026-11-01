@@ -26,6 +26,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from classify_poi import as_medical
+
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(HOME, "db", "pharmacy.sqlite")
 OUT_GEO = os.path.join(HOME, "web", "public", "geo")
@@ -111,24 +113,17 @@ def to_point(pl: dict, wanted: str) -> dict | None:
     if pl.get("businessStatus") == "CLOSED_PERMANENTLY":
         return None
     types = [t.lower() for t in (pl.get("types") or [])]
-    if wanted not in types:
-        return None
-    if "pharmacy" in types:            # a pharmacy with a consultation desk is not a clinic
-        return None
+    name = ((pl.get("displayName") or {}).get("text") or "").strip()
     if not inside_outline(float(lat), float(lon)):
         return None
-    # Google returns a dentist inside the doctor search and a hospital inside the
-    # clinic search, so the kind comes from the place's own types, ordered by how
-    # much traffic each brings to a pharmacy next door.
-    kind = "doctor"
-    for g, label in (("hospital", "hospital"), ("medical_clinic", "clinic"),
-                     ("dentist", "dentist"), ("medical_lab", "lab")):
-        if g in types:
-            kind = label
-            break
+    # Google's own category is a hint, never the verdict: it files tire shops and
+    # bag shops under «medical_clinic». `classify_poi` weighs the name first.
+    kind = as_medical(name, types)
+    if kind is None:
+        return None
     return {
         "kind": kind,
-        "name": ((pl.get("displayName") or {}).get("text") or "").strip() or kind,
+        "name": name or kind,
         "lat": round(float(lat), 6),
         "lon": round(float(lon), 6),
         "address": pl.get("formattedAddress"),
