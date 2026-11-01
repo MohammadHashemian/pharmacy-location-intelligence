@@ -66,20 +66,30 @@ export async function POST(req: Request) {
           });
         }
         last = { status: r.status, text };
-        if ([401, 403, 480].includes(r.status)) break; // the key itself is bad
+        if ([401, 403, 480, 483].includes(r.status)) break; // the key itself is wrong
       }
       return NextResponse.json(
         {
           ok: false,
           status: last.status,
+          kind:
+            value.startsWith("service.")
+              ? "service"
+              : value.startsWith("web.")
+                ? "web"
+                : value.startsWith("mobile.")
+                  ? "mobile"
+                  : "unknown",
           error:
-            last.status === 485
-              ? "این کلید سرویس مکانیابی ندارد (485). در پنل نشان کلیدی با سرویس «مکانهای نزدیک» یا «جستجو» بسازید؛ فعالسازی با تیکت پشتیبانی انجام میشود."
-              : last.status === 480 || last.status === 401 || last.status === 403
-                ? "کلید پذیرفته نشد — کلید سرویس را بررسی کنید"
-                : last.status === 481 || last.status === 482
-                  ? "سهمیهٔ درخواست نشان تمام شده (۴۸۱/۴۸۲)"
-                  : `نشان پاسخ ${last.status} داد`,
+            last.status === 483 || value.startsWith("web.")
+              ? "این کلید از نوع «وب / SDK نقشه» است (web.…)، نه کلید سرویس. در پنل نشان یک کلید نوع «سرویس» با سرویس «مکان‌های نزدیک» یا «جستجو» بسازید."
+              : last.status === 485
+                ? "این کلید سرویس مکان‌یابی ندارد (485). در پنل نشان کلید نوع «سرویس» با سرویس «مکان‌های نزدیک» یا «جستجو» بسازید؛ فعال‌سازی با تیکت پشتیبانی انجام می‌شود."
+                : last.status === 480 || last.status === 401 || last.status === 403
+                  ? "کلید پذیرفته نشد — کلید سرویس را بررسی کنید"
+                  : last.status === 481 || last.status === 482
+                    ? "سهمیهٔ درخواست نشان تمام شده (۴۸۱/۴۸۲)"
+                    : `نشان پاسخ ${last.status} داد`,
           detail: last.text.slice(0, 300),
         },
         { status: 200 },

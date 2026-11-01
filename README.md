@@ -963,6 +963,7 @@ Errors seen in practice and what they mean:
 | code | meaning | fix |
 |---|---|---|
 | 480 | `API Key not found or is not valid` | wrong/rotated key |
+| **483** | `API Key type not suitable for this service` — a **web**/SDK key (`web.…`) was stored; SDK keys are bound to a browser domain and refuse every server call | create a key of type **سرویس** (`service.…`) |
 | **485** | `Api Key services not match` — the key is scoped to another service (e.g. reverse geocoding works, search does not) | create a key for **جستجو / Search** in the Neshan panel; their docs say activation needs a **support ticket** |
 | 481/482 | quota / rate limit | wait or upgrade the plan |
 

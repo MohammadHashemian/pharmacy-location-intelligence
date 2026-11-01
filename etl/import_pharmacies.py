@@ -202,11 +202,15 @@ def detect_service(key: str, lat: float, lon: float) -> str | None:
     if code2 == 200:
         return "search"
     last = code2 if code2 != 200 else code
-    if last == 485:
-        print("HTTP 485 = this key is not scoped to a search service.")
-        print("  In the Neshan panel (platform.neshan.org) create a key for")
-        print("  «مکان‌های نزدیک / Nearby» or «جستجو / Search» — activating them needs a")
-        print("  support ticket. The reverse-geocoding service alone cannot list POIs.")
+    if key.startswith("web.") or last == 483:
+        print("This is a WEB (map SDK) key — prefix «web.». REST APIs answer 483")
+        print("  «API Key type not suitable for this service» to it.")
+        print("  Create a key of type «سرویس» (service.…) with the service")
+        print("  «مکان‌های نزدیک / Nearby» or «جستجو / Search».")
+    elif last == 485:
+        print("HTTP 485 = this key is a service key, but not for a search service.")
+        print("  Create the key with «مکان‌های نزدیک» or «جستجو» selected — Neshan")
+        print("  activates those through a support ticket.")
     else:
         print(f"no usable Neshan search service (nearby={code}, search={code2})")
     return None
@@ -289,7 +293,7 @@ def main() -> int:
                 code, items = call_search(key, args.term, la, lo)
             codes[code] = codes.get(code, 0) + 1
             if code != 200:
-                if code in (401, 403, 480, 485):
+                if code in (401, 403, 480, 483, 485):
                     print(f"stopped at {name}: HTTP {code}")
                     return 3
                 time.sleep(1.0)
