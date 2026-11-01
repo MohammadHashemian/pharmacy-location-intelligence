@@ -16,7 +16,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { all, one } from "./db";
+import { all, one, run } from "./db";
 
 export type MapSettlement = {
   id: number;
@@ -243,6 +243,24 @@ function readShapes(file: string): MapShape[] {
   }));
 }
 
+/** The table exists from the first hand-added pin; the loader may run before the
+    API ever does, so it creates it here too rather than failing the whole page. */
+function ensureManualTable(): void {
+  run(`CREATE TABLE IF NOT EXISTS manual_pharmacy (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    lat             REAL NOT NULL,
+    lon             REAL NOT NULL,
+    address         TEXT,
+    phone           TEXT,
+    note            TEXT,
+    nearest_area_id INTEGER,
+    nearest_km      REAL,
+    county          TEXT,
+    created_at      TEXT NOT NULL
+  )`);
+}
+
 export function loadMapData(): MapData {
   const rows = all<{
     area_id: number;
@@ -350,6 +368,7 @@ export function loadMapData(): MapData {
     urban: c.nearest_urban,
   }));
 
+  ensureManualTable();
   const pharmacies: MapPharmacy[] = all<{
     osm_type: string;
     osm_id: number;
@@ -382,7 +401,16 @@ export function loadMapData(): MapData {
     LEFT JOIN admin_area a ON a.id = p.nearest_area_id
     LEFT JOIN pharmacy_profile f
            ON f.external_id = p.external_id AND f.source = p.source
-    ORDER BY p.osm_type, p.osm_id
+    /* Hand-added pins live in their own table so a rebuild cannot delete them; the
+       map treats them like any other pharmacy, with source='manual'. */
+    UNION ALL
+    SELECT 'manual' AS osm_type, m.id AS osm_id, 'manual' AS source, m.name,
+           NULL AS name_en, m.lat, m.lon, COALESCE(m.nearest_km, 0) AS nearest_km,
+           a2.name AS settlement, m.county, m.nearest_area_id AS area_id,
+           m.address, m.phone, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+    FROM manual_pharmacy m
+    LEFT JOIN admin_area a2 ON a2.id = m.nearest_area_id
+    ORDER BY 1, 2
   `).map((p) => ({
     id: `${p.osm_type}/${p.osm_id}`,
     source: p.source ?? p.osm_type,

@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 /**
  * Interactive map of استان خوزستان.
  *
@@ -580,6 +582,16 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
   /** Point chosen on empty ground: the "should I put a pharmacy here" probe. */
   const [probe, setProbe] = useState<{ lat: number; lon: number } | null>(null);
+  /* Hand-added pharmacy: click a spot, name it, save. The row lives in
+     `manual_pharmacy`, which no ETL run rewrites. */
+  const router = useRouter();
+  const [addMode, setAddMode] = useState(false);
+  const [addPin, setAddPin] = useState<{ lat: number; lon: number } | null>(null);
+  const [addName, setAddName] = useState("");
+  const [addAddr, setAddAddr] = useState("");
+  const [addPhone, setAddPhone] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+  const [addMsg, setAddMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [probeMode, setProbeMode] = useState(false);
 
   /* Roads come from a static asset (1.5 MB), not the RSC payload: they never
@@ -1837,6 +1849,23 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             >
               {probeMode ? "روی نقشه کلیک کنید…" : "تحلیل یک نقطه"}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAddMode((v) => !v);
+                setAddPin(null);
+                setAddMsg(null);
+                setProbeMode(false);
+              }}
+              className={`shrink-0 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition ${
+                addMode
+                  ? "border-good/50 bg-good-soft text-good"
+                  : "border-line bg-surface text-muted hover:text-ink"
+              }`}
+              title="اگر داروخانه‌ای روی نقشه نیست، اینجا اضافه کنید"
+            >
+              {addMode ? "روی نقشه کلیک کنید…" : "افزودن داروخانه"}
+            </button>
             {/* six checkboxes used to eat three wrapped rows; they live in one
                 popover now, and the toolbar stays a single line */}
             <details className="relative sm:ml-auto">
@@ -1935,6 +1964,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 if (viewRef.current.k < 6) {
                   commit(6, W / 2 - sx * 6, H / 2 - sy * 6);
                 }
+                return;
+              }
+              if (addMode) {
+                const [px, py] = toScene(e.clientX, e.clientY);
+                const [la, lo] = scene.inv(px, py);
+                setAddPin({ lat: la, lon: lo });
+                setAddMsg(null);
                 return;
               }
               const hit = hitTest(e.clientX, e.clientY);
@@ -2070,6 +2106,22 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <g data-layer="medical">{medicalLayer}</g>
               <g data-layer="pharmacy">{pharmacyLayer}</g>
 
+              {addPin ? (
+                <g pointerEvents="none">
+                  {(() => {
+                    const [cx, cy] = scene.proj(addPin.lat, addPin.lon);
+                    return (
+                      <g>
+                        <circle cx={cx} cy={cy} r={9 / view.k} fill="#16a34a" opacity={0.18} />
+                        <circle cx={cx} cy={cy} r={4 / view.k} fill="#16a34a" stroke="#fff" strokeWidth={1.6 / view.k} />
+                        <line x1={cx - 14 / view.k} y1={cy} x2={cx + 14 / view.k} y2={cy} stroke="#16a34a" strokeWidth={1 / view.k} />
+                        <line x1={cx} y1={cy - 14 / view.k} x2={cx} y2={cy + 14 / view.k} stroke="#16a34a" strokeWidth={1 / view.k} />
+                      </g>
+                    );
+                  })()}
+                </g>
+              ) : null}
+
               {probe ? (
                 <g pointerEvents="none">
                   {[1, 2, 5, 10].map((r) => (
@@ -2143,6 +2195,112 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           {layers.sat ? (
             <div className="pointer-events-none absolute bottom-1 left-2 z-10 rounded bg-white/85 px-1.5 py-0.5 text-[9.5px] text-[#334155] shadow-sm">
               تصویر: Esri · Maxar · Earthstar Geographics
+            </div>
+          ) : null}
+
+          {addMode && addPin ? (
+            <div className="absolute bottom-2 right-2 z-30 w-[268px] max-w-[86vw] rounded-xl border border-good/40 bg-surface p-2.5 text-[11px] shadow-xl">
+              <div className="flex items-center justify-between gap-2">
+                <b className="text-[12px] text-ink">داروخانهٔ جدید</b>
+                <span className="text-[9.5px] text-faint">
+                  <bdi dir="ltr">
+                    {addPin.lat.toFixed(5)}, {addPin.lon.toFixed(5)}
+                  </bdi>
+                </span>
+              </div>
+              <input
+                autoFocus
+                value={addName}
+                onChange={(e) => setAddName(e.target.value)}
+                placeholder="نام داروخانه (الزامی)"
+                className="mt-1.5 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11.5px] text-ink placeholder:text-faint"
+              />
+              <input
+                value={addAddr}
+                onChange={(e) => setAddAddr(e.target.value)}
+                placeholder="نشانی (اختیاری)"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11px] text-ink placeholder:text-faint"
+              />
+              <input
+                value={addPhone}
+                onChange={(e) => setAddPhone(e.target.value)}
+                placeholder="تلفن (اختیاری)"
+                dir="ltr"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-left text-[11px] text-ink placeholder:text-right placeholder:text-faint"
+              />
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={addBusy || addName.trim().length < 3}
+                  onClick={async () => {
+                    setAddBusy(true);
+                    setAddMsg(null);
+                    try {
+                      const r = await fetch("/api/pharmacies", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          name: addName,
+                          lat: addPin.lat,
+                          lon: addPin.lon,
+                          address: addAddr,
+                          phone: addPhone,
+                        }),
+                      });
+                      const j = (await r.json()) as {
+                        ok?: boolean;
+                        error?: string;
+                        settlement?: string;
+                        km?: number;
+                      };
+                      if (r.ok && j.ok) {
+                        setAddMsg({
+                          ok: true,
+                          text: `ثبت شد · ${j.settlement ?? ""} (${j.km ?? 0} کم)`,
+                        });
+                        setAddName("");
+                        setAddAddr("");
+                        setAddPhone("");
+                        setAddPin(null);
+                        router.refresh();
+                      } else {
+                        setAddMsg({ ok: false, text: j.error ?? "ثبت نشد" });
+                      }
+                    } catch {
+                      setAddMsg({ ok: false, text: "ارتباط با سرور برقرار نشد" });
+                    } finally {
+                      setAddBusy(false);
+                    }
+                  }}
+                  className="rounded-lg border border-good bg-good px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-40"
+                >
+                  {addBusy ? "…" : "ذخیره"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddPin(null);
+                    setAddMsg(null);
+                  }}
+                  className="rounded-lg border border-line-strong bg-surface px-2 py-1 text-[11px] text-muted"
+                >
+                  لغو
+                </button>
+                <span className="text-[9.5px] text-faint">
+                  روی نقشه کلیک کنید تا نقطه عوض شود
+                </span>
+              </div>
+              {addMsg ? (
+                <div
+                  className={`mt-1.5 rounded-lg border px-2 py-1 text-[10.5px] ${
+                    addMsg.ok
+                      ? "border-good/25 bg-good-soft text-good"
+                      : "border-danger/25 bg-danger-soft text-danger"
+                  }`}
+                >
+                  {addMsg.text}
+                </div>
+              ) : null}
             </div>
           ) : null}
 

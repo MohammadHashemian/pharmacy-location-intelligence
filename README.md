@@ -353,6 +353,24 @@ starts with a neighbourhood word (کوی/شهرک/محله/…) *and* ends with 
 in — «بیت باوی» and «کشت و صنعت کارون» are real names whose last word happens to be a
 county, and trimming them would destroy them.
 
+### Adding a pharmacy by hand (`/api/pharmacies`)
+
+No dataset is complete, and the map is a decision tool — so a place you can see with
+your own eyes must be pinnable. «افزودن داروخانه» in the toolbar turns the cursor into
+a pin: click the spot, name it, save. The pin appears immediately with `source='manual'`
+and counts in density, the ring table and the per-pharmacy ratio like any imported row.
+
+Rows live in their own table, **not** in `map_pharmacy`: every ETL run rewrites that one
+from Google/OSM, and a rebuild must never delete something a person verified by hand.
+`/api/pharmacies` validates the same way the importer does — inside خوزستان, within
+16 km of a known settlement (so `nearest_area_id`/`county` are real), and 90 m away from
+any existing pin, imported or manual.
+
+```bash
+curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'   -d '{"name":"داروخانه دکتر سجادی","lat":31.27783,"lon":48.61470}'
+curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
+```
+
 ### Layer test (`tools/test_map_layers.py`)
 
 The map is hand-drawn SVG, so «the streets disappeared» can be four different bugs: the
