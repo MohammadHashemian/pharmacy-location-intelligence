@@ -328,6 +328,33 @@ and never double-counted:
 Every settlement tooltip/card shows the split — جمعیت, داروخانه (FDA), نقشهشده,
 بدون موقعیت — and the header chip reads «۸۹۴ داروخانه در فید سازمان · ۴۱۹ روی نقشه».
 
+### Urban detail: streets and a population surface
+
+The province layer knows where people live to the settlement, which is too coarse
+inside a city. Two urban layers close that gap, both fetched per city and cached in
+`data/derived/urban/<slug>.json`:
+
+```bash
+python etl/fetch_urban_detail.py --cities 6      # streets + building centres
+python etl/fetch_urban_detail.py --rebuild-cells  # recompute cells from the cache
+python etl/build_pop_surface.py                   # census population → cells
+```
+
+* **streets** — `highway=tertiary|residential|unclassified|living_street` inside
+  6 km of each city centre, simplified to ~9 m and written to
+  `web/public/geo/streets_<slug>.json`. The client fetches the one city the view is
+  centred on, only above 4.5×, and draws it under the arterial network.
+* **population surface** — each city's census population is spread over a 250 m grid
+  in proportion to **street metres** per cell (the built-up proxy with real
+  coverage here), with a floor of 20 % of the mean so an unmapped block is not a
+  desert. Building footprints are fetched too and used as the fallback basis;
+  OSM has 3.8 k of them for a 1.2 M city, i.e. 308 people per building, which is why
+  streets — not buildings — carry the weight. Output: `web/public/geo/urban_pop.json`.
+
+The analytical mode «نفر به ازای داروخانه» divides that population surface by the
+pharmacy supply (located + the FDA residual surface) on the same 1.5 km kernel:
+**blue = well covered, red = many residents per pharmacy**, i.e. where the gap is.
+
 ### Pharmacy profiles and the demand side
 
 Two more tables sit beside the map layer:

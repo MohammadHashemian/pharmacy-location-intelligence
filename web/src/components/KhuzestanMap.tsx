@@ -50,6 +50,8 @@ const COLORS = {
    area stays "no data" instead of "healthy". */
 const DENS_RAMP = ["#f2fdfb", "#99f6e4", "#2dd4bf", "#0d9488", "#115e59"];
 const GAP_RAMP = ["#fef3c7", "#fcd34d", "#fb923c", "#f43f5e", "#9f1239"];
+/* residents per pharmacy: blue = covered, red = many people per shop (a gap) */
+const RATIO_RAMP = ["#1d4ed8", "#0ea5e9", "#facc15", "#f97316", "#b91c1c"];
 
 function ramp(stops: string[], t: number): string {
   const x = Math.max(0, Math.min(1, t)) * (stops.length - 1);
@@ -365,7 +367,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   /** Authoritative view for gestures: wheel events fire faster than React can
       re-render, and a stale `view` here would drop every second notch. */
   const viewRef = useRef(view);
-  const [mode, setMode] = useState<"dens" | "gap">("dens");
+  const [mode, setMode] = useState<"dens" | "gap" | "ratio">("dens");
   const [layers, setLayers] = useState({
     density: true,
     network: false,
@@ -374,6 +376,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     pharm: true,
     osm: true,
     med: true,
+    streets: true,
   });
   const [targetPerPharm, setTargetPerPharm] = useState(
     Math.round((data.meta.residentsPerPharmacy || 5400) / 100) * 100,
@@ -457,11 +460,99 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
   /* The fine density grid is recomputed from the settlement list whenever the
      view settles — 30-60 ms of work that must not run on every wheel tick. */
+  /* Population surface: census population spread over OSM building counts
+     (etl/build_pop_surface.py → /geo/urban_pop.json). Loaded only when the ratio
+     layer is on, so the first paint stays light. */
+  const [popCells, setPopCells] = useState<{ lat: number; lon: number; pop: number }[] | null>(
+    null,
+  );
+  /* Streets for the city the reader is zoomed into (one at a time, fetched on
+     demand from /geo/streets_<slug>.json). */
+  const streetCache = useRef<Map<string, { c: string; p: [number, number][] }[]>>(new Map());
+  const [streetCity, setStreetCity] = useState<string | null>(null);
+  const [streetLines, setStreetLines] = useState<{ c: string; p: [number, number][] }[]>([]);
+  const streetIndex = useRef<{ city: string; slug: string; lat: number; lon: number; r_km: number }[] | null>(null);
+
   const [settled, setSettled] = useState(view);
   useEffect(() => {
     const t = setTimeout(() => setSettled(view), 160);
     return () => clearTimeout(t);
   }, [view]);
+
+  /* Load the population surface the first time the ratio layer is opened. */
+  useEffect(() => {
+    if (mode !== "ratio" || popCells) return;
+    let alive = true;
+    fetch("/geo/urban_pop.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { cells?: [number, number, number, number][] } | null) => {
+        if (!alive || !d?.cells) return;
+        setPopCells(d.cells.map(([lat, lon, pop]) => ({ lat, lon, pop })));
+      })
+      .catch(() => setPopCells([]));
+    return () => {
+      alive = false;
+    };
+  }, [mode, popCells]);
+
+  /* Streets: one city at a time, whichever the view is centred on, only above 5x —
+     a 40k-segment file has no business on a province view. */
+  useEffect(() => {
+    if (!layers.streets || settled.k < 5) {
+      if (streetLines.length) setStreetLines([]);
+      return;
+    }
+    let alive = true;
+    (async () => {
+      if (!streetIndex.current) {
+        const idx = await fetch("/geo/streets_index.json")
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => []);
+        streetIndex.current = Array.isArray(idx) ? idx : [];
+      }
+      const idx = streetIndex.current ?? [];
+      const cx0 = -settled.tx / settled.k;
+      const cy0 = -settled.ty / settled.k;
+      const [vLat, vLon] = scene.inv(cx0 + W / 2 / settled.k, cy0 + H / 2 / settled.k);
+      let best: (typeof idx)[number] | null = null;
+      let bestD = Infinity;
+      for (const c of idx) {
+        const d = Math.hypot((c.lat - vLat) * 111, (c.lon - vLon) * 95);
+        if (d < bestD) {
+          bestD = d;
+          best = c;
+        }
+      }
+      if (!best || bestD > best.r_km) {
+        if (alive) setStreetLines([]);
+        return;
+      }
+      if (streetCache.current.has(best.slug)) {
+        if (alive) {
+          setStreetLines(streetCache.current.get(best.slug) ?? []);
+          setStreetCity(best.city);
+        }
+        return;
+      }
+      const fc = await fetch(`/geo/streets_${best.slug}.json`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      const feats = (fc?.features ?? [])
+        .map((f: { properties?: { c?: string }; geometry?: { coordinates?: [number, number][] } }) => ({
+          c: f.properties?.c ?? "residential",
+          p: (f.geometry?.coordinates ?? []).map(([lon, lat]) => [lat, lon] as [number, number]),
+        }))
+        .filter((f: { p: [number, number][] }) => f.p.length >= 2);
+      streetCache.current.set(best.slug, feats);
+      if (alive) {
+        setStreetLines(feats);
+        setStreetCity(best.city);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [layers.streets, settled, scene]);
 
   /** Point chosen on empty ground: the "should I put a pharmacy here" probe. */
   const [probe, setProbe] = useState<{ lat: number; lon: number } | null>(null);
@@ -964,6 +1055,52 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     );
   }, [data.medical, layers.med, scene.med, view.k]);
 
+  /* Urban streets, projected once and grouped by class. Only the city the view
+     is centred on is loaded, and only above ~5x. */
+  const streetLayer = useMemo(() => {
+    if (!layers.streets || !streetLines.length || view.k < 4.5) return null;
+    const byClass = new Map<string, string[]>();
+    for (const seg of streetLines) {
+      const pts = seg.p.map(([la, lo]) => scene.proj(la, lo));
+      if (pts.length < 2) continue;
+      let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+      for (let i = 1; i < pts.length; i++) d += `L${pts[i][0].toFixed(1)} ${pts[i][1].toFixed(1)}`;
+      const list = byClass.get(seg.c);
+      if (list) list.push(d);
+      else byClass.set(seg.c, [d]);
+    }
+    const width: Record<string, number> = {
+      tertiary: 1.7, secondary: 2.1, residential: 1.0, unclassified: 0.8, living_street: 0.7,
+    };
+    const paths = [...byClass.entries()];
+    return (
+      <g pointerEvents="none">
+        {paths.map(([cls, ds]) => (
+          <path
+            key={`c-${cls}`}
+            d={ds.join(" ")}
+            fill="none"
+            stroke="#ffffff"
+            strokeOpacity={0.9}
+            strokeWidth={((width[cls] ?? 0.8) + 1.6) / view.k}
+            strokeLinecap="round"
+          />
+        ))}
+        {paths.map(([cls, ds]) => (
+          <path
+            key={cls}
+            d={ds.join(" ")}
+            fill="none"
+            stroke="#8a9bad"
+            strokeOpacity={0.95}
+            strokeWidth={(width[cls] ?? 0.8) / view.k}
+            strokeLinecap="round"
+          />
+        ))}
+      </g>
+    );
+  }, [layers.streets, streetLines, scene, view.k]);
+
   const edgeLayer = useMemo(
     () => (
       <g stroke={COLORS.tree} strokeWidth={0.7} strokeOpacity={0.5} fill="none">
@@ -1089,6 +1226,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       if (list) list.push(i);
       else wb.set(kk, [i]);
     });
+    const popBuckets: Map<number, number[]> = new Map();
+    (popCells ?? []).forEach((pc, i) => {
+      const kk = key(pc.lat, pc.lon);
+      const list = popBuckets.get(kk);
+      if (list) list.push(i);
+      else popBuckets.set(kk, [i]);
+    });
     const residualBuckets: Map<number, number[]> = new Map();
     supply.residual.forEach((r, i) => {
       const kk = key(r.lat, r.lon);
@@ -1136,8 +1280,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
              whole city and never shows that کیانپارس has a pharmacy every 200 m.
            - «شکاف ظرفیت» stays per-capita, which is the right unit for a region.
         */
-        const R = mode === "dens" ? 1.5 : 3;
+        const R = mode === "dens" || mode === "ratio" ? 1.5 : 3;
         let surface = 0;                     // pharmacies/km² we cannot place
+        let popHere = 0;                     // people on the same kernel
         for (let oa = -1; oa <= 1; oa++) {
           for (let ol = -1; ol <= 1; ol++) {
             const kk = key(la + oa * 0.03, lo + ol * 0.03);
@@ -1149,15 +1294,41 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               const r = supply.residual[i];
               if (dist(la, lo, r.lat, r.lon) <= r.km) surface += r.perKm2;
             }
+            for (const i of popBuckets.get(kk) ?? []) {
+              const q = popCells![i];
+              if (dist(la, lo, q.lat, q.lon) <= R) popHere += q.pop;
+            }
           }
         }
         if (!near) continue;
         if (mode === "gap" && pop <= 0) continue;
         const areaKm2 = Math.PI * R * R;
-        const v =
-          mode === "dens"
-            ? ph / areaKm2 + surface        // located per km² + the un-located remainder
-            : Math.max(0, pop / targetPerPharm - ph - surface * areaKm2);
+        const supplyKm2 = ph / areaKm2 + surface;   // pharmacies per km²
+        let v: number;
+        if (mode === "dens") {
+          v = supplyKm2;
+        } else if (mode === "ratio") {
+          /* People per pharmacy. Where the building surface exists it is used
+             as-is (census population spread over footprints); elsewhere the
+             settlement population is spread over the town disc, which is the same
+             assumption the density layer already makes. */
+          let popKm2 = popHere / areaKm2;
+          if (popHere <= 0) {
+            for (let oa = -1; oa <= 1; oa++) {
+              for (let ol = -1; ol <= 1; ol++) {
+                for (const i of b.get(key(la + oa * 0.03, lo + ol * 0.03)) ?? []) {
+                  const st = settlements[i];
+                  const d = dist(la, lo, st.lat, st.lon);
+                  const km2 = Math.max(2.5, Math.min(12, 0.9 * Math.sqrt(Math.max(0, st.pop ?? 0) / 1000)));
+                  if (d <= km2) popKm2 += (st.pop ?? 0) / (Math.PI * km2 * km2);
+                }
+              }
+            }
+          }
+          v = Math.min(60000, popKm2 / Math.max(0.05, supplyKm2));
+        } else {
+          v = Math.max(0, pop / targetPerPharm - ph - surface * areaKm2);
+        }
         if (v > maxV) maxV = v;
         const [cx, cy] = scene.proj(la, lo);
         out.push({ x: cx, y: cy, v, pop, ph, n });
@@ -1171,7 +1342,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       ? Math.max(1e-6, sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))])
       : 1;
     return { cells: out, max: maxV, cap, stepKm, dLat, dLon };
-  }, [settled, scene, settlements, mode, targetPerPharm, supply]);
+  }, [settled, scene, settlements, mode, targetPerPharm, supply, popCells]);
 
   /* Roads: culled to the viewport and to the class the zoom level needs, then
      concatenated into two paths — 8k <path> nodes would choke the renderer. */
@@ -1481,6 +1652,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               {(
                 [
                   ["dens", "تراکم داروخانه"],
+                  ["ratio", "نفر به ازای داروخانه"],
                   ["gap", "شکاف ظرفیت"],
                 ] as const
               ).map(([id, label]) => (
@@ -1531,6 +1703,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     ["admin", "مرزها"],
                     ["labels", "برچسب‌ها"],
                     ["pharm", "داروخانه‌دار"],
+                    ["streets", "خیابان‌ها"],
                     ["med", "خدمات درمانی"],
                     ["osm", "داروخانه‌های نقشه"],
                   ] as const
@@ -1663,14 +1836,19 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                         mode === "dens" && c.v <= 0
                           ? "#e2e8f0"
                           : ramp(
-                              mode === "dens" ? DENS_RAMP : GAP_RAMP,
+                              mode === "dens"
+                                ? DENS_RAMP
+                                : mode === "gap"
+                                  ? GAP_RAMP
+                                  : RATIO_RAMP,
                               Math.min(1, c.v / fineCells.cap),
                             )
                       }
                       fillOpacity={
                         mode === "dens" && c.v <= 0
-                          ? 0.5
-                          : 0.35 + 0.5 * Math.min(1, c.v / fineCells.cap)
+                          ? 0.45
+                          : (view.k >= 4.5 ? 0.22 : 0.35) +
+                            0.45 * Math.min(1, c.v / fineCells.cap)
                       }
                     />
                   ))}
@@ -1715,6 +1893,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 );
               })()}
 
+              {streetLayer}
               {layers.network ? edgeLayer : null}
               {dotLayer}
               {medicalLayer}
@@ -1946,7 +2125,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="flex h-2 w-24 overflow-hidden rounded-full">
-              {(mode === "dens" ? DENS_RAMP : GAP_RAMP).map((c) => (
+              {(mode === "dens" ? DENS_RAMP : mode === "gap" ? GAP_RAMP : RATIO_RAMP).map((c) => (
                 <span key={c} className="flex-1" style={{ background: c }} />
               ))}
             </span>
@@ -1954,7 +2133,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               ? view.k >= 1.8
                 ? "داروخانه در هر کم² (۱٫۵ کم) · خاکستری = مسکونی بدون داروخانهٔ نقشه‌شده"
                 : "داروخانه به ازای ۱۰٬۰۰۰ نفر"
-              : "شکاف ظرفیت کم → زیاد"}
+              : mode === "ratio"
+                ? "نفر به ازای هر داروخانه · آبی = پوشش، قرمز = کمبود"
+                : "شکاف ظرفیت کم → زیاد"}
             <span className="text-faint">
               {view.k >= 3.4 ? "· شبکهٔ ۱ کم" : `· فقط مسکونی`}
             </span>

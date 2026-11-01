@@ -189,3 +189,17 @@ LEFT JOIN map_point p            ON p.area_id = a.area_id
 LEFT JOIN v_map_pharmacy ph      ON ph.area_id = a.area_id
 LEFT JOIN v_map_pharmacy_mapped mp ON mp.area_id = a.area_id
 WHERE a.kind IN ('city', 'village');
+
+
+-- 250 m urban grid: OSM buildings + street metres per cell. `etl/fetch_urban_detail.py`
+-- fills it, `etl/build_pop_surface.py` turns it into a population surface.
+create table if not exists urban_cell (
+  city       text not null,
+  lat        real not null,
+  lon        real not null,
+  buildings  integer not null default 0,
+  street_m   real not null default 0,
+  population integer,
+  primary key (city, lat, lon)
+);
+create index if not exists idx_urban_cell_latlon on urban_cell (lat, lon);
