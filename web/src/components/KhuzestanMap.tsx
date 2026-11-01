@@ -1114,11 +1114,16 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
     for (const l of labels) {
       if (!place(l.x, l.y, l.text, l.size)) continue;
+      /* a town on the province edge had its label cut by the frame («رامهرمز»
+         came out as «رامز»); keep the text inside the canvas instead */
+      const half = (l.text.length * (l.size / k) * 0.8) / 2;
+      const lx = Math.min(W - half - 4, Math.max(half + 4, l.x));
+      const ly = Math.min(H - 6, Math.max((l.size / k) + 4, l.y));
       out.push(
         <text
           key={l.key}
-          x={l.x}
-          y={l.y}
+          x={lx}
+          y={ly}
           textAnchor="middle"
           fontSize={l.size / k}
           fontWeight={l.weight}
