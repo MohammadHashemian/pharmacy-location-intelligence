@@ -603,7 +603,43 @@ def ring_of(km: float) -> int:
 # --------------------------------------------------------------------------- #
 # density
 # --------------------------------------------------------------------------- #
-def build_density(pts: list[dict], baseline: float) -> list[dict]:
+def pharmacy_weights(pts: list[dict],
+                     mapped: list[tuple[int, float, float]]) -> list[tuple[float, float, float]]:
+    """Spread each settlement's FDA count over the pharmacies actually mapped in it.
+
+    The FDA feed gives a count per settlement and nothing else, so one city dot
+    carried 341 pharmacies and every cell in a 3 km window inherited that number —
+    inside اهواز a district with 20 pharmacies and an empty one looked identical.
+    Each mapped pharmacy now carries `total / n_mapped`, which keeps the province
+    total exactly and puts the weight where the stores are; a settlement with no
+    mapped pharmacy keeps its whole count on the centroid.
+    """
+    by_area: dict[int, list[tuple[float, float]]] = {}
+    for area_id, lat, lon in mapped:
+        if area_id is None:
+            continue
+        by_area.setdefault(int(area_id), []).append((float(lat), float(lon)))
+    out: list[tuple[float, float, float]] = []
+    moved = 0
+    for p in pts:
+        total = float(p["pharmacy_total"] or 0)
+        if total <= 0:
+            continue
+        here = by_area.get(int(p["area_id"])) or []
+        if here:
+            w = total / len(here)
+            for lat, lon in here:
+                out.append((lat, lon, w))
+            moved += 1
+        else:
+            out.append((float(p["lat"]), float(p["lon"]), total))
+    print(f"  pharmacy weights: {moved:,} settlements redistributed over "
+          f"{sum(1 for _ in out):,} weighted points")
+    return out
+
+
+def build_density(pts: list[dict], baseline: float,
+                  weights: list[tuple[float, float, float]] | None = None) -> list[dict]:
     lat = np.array([p["lat"] for p in pts], dtype=float)
     lon = np.array([p["lon"] for p in pts], dtype=float)
     pop = np.array([float(p["population"] or 0) for p in pts])
@@ -616,6 +652,25 @@ def build_density(pts: list[dict], baseline: float) -> list[dict]:
     buckets: dict[tuple[int, int], list[int]] = {}
     for j, (cx, cy) in enumerate(zip(x, y)):
         buckets.setdefault((int(cx // WINDOW_KM), int(cy // WINDOW_KM)), []).append(j)
+    # weighted pharmacy supply: one entry per mapped store (or per settlement
+    # centroid when nothing is mapped there)
+    if weights:
+        wlat = np.array([w[0] for w in weights], dtype=float)
+        wlon = np.array([w[1] for w in weights], dtype=float)
+        wval = np.array([w[2] for w in weights], dtype=float)
+        wx, wy = km_xy(wlat, wlon)
+        wbuckets: dict[tuple[int, int], list[int]] = {}
+        for j, (cx, cy) in enumerate(zip(wx, wy)):
+            wbuckets.setdefault((int(cx // WINDOW_KM), int(cy // WINDOW_KM)), []).append(j)
+    else:
+        wx = wy = wval = None
+        wbuckets = {}
+
+    # The residential mask follows the population: a 1.2 M city covers ~12 km of
+    # ground, and a flat 2.5 km mask around its single centroid erased every
+    # district of اهواز from the grid.
+    mask_km = np.clip(0.9 * np.sqrt(np.maximum(pop, 0) / 1000), MASK_KM, 12.0)
+
     cities = [(x[j], y[j]) for j in range(len(pts)) if kind[j] == "city"]
     city_idx = [j for j in range(len(pts)) if kind[j] == "city"]
 
@@ -636,13 +691,21 @@ def build_density(pts: list[dict], baseline: float) -> list[dict]:
                         near.append(j)
                     if d < nearest_d:
                         nearest_d, nearest_j = d, j
-        if nearest_d > MASK_KM or nearest_j is None:
+        if nearest_j is None or nearest_d > float(mask_km[nearest_j]):
             continue                     # desert / ridge / marsh: not a residential cell
         kept += 1
         w_pop = float(pop[near].sum())
         if w_pop <= 0:
             continue                     # somebody lives here, but no count: no cell
-        w_ph = float(ph[near].sum())
+        if wx is not None:
+            w_ph = 0.0
+            for ox in (-1, 0, 1):
+                for oy in (-1, 0, 1):
+                    for j in wbuckets.get((bx + ox, by + oy), ()):
+                        if math.hypot(wx[j] - cx, wy[j] - cy) <= WINDOW_KM:
+                            w_ph += float(wval[j])
+        else:
+            w_ph = float(ph[near].sum())
         urban_name = None
         if city_idx:
             k = min(range(len(city_idx)),
@@ -791,8 +854,17 @@ def main() -> int:
     print(f"province basis: {prov_pop:,.0f} population · {prov_ph:,.0f} pharmacies "
           f"· {baseline:,.0f} residents per pharmacy")
 
-    cells = build_density(pts, baseline)
     pharmacies = export_pharmacies(pts)
+    # pharmacies exported above are OSM (they are re-inserted after this), so the
+    # rest of the map — Google/Neshan imports — is read from the table as it
+    # stands; both feed the same weighting
+    mapped = [(r[6], r[4], r[5]) for r in pharmacies]
+    mapped += [(r[0], r[1], r[2]) for r in c.execute("""
+        SELECT nearest_area_id, lat, lon FROM map_pharmacy
+        WHERE source <> 'osm' AND nearest_area_id IS NOT NULL
+    """)]
+    print(f"  mapped pharmacies for density: {len(mapped):,}")
+    cells = build_density(pts, baseline, pharmacy_weights(pts, mapped))
 
     # --- admin polygons for the map background -----------------------------
     county_of = {}

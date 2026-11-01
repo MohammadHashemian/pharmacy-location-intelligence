@@ -289,6 +289,30 @@ feeds it in two controlled ways, and neither invents a pharmacy number:
 python etl/link_admin_places.py --min-village 3000   # idempotent
 ```
 
+### Density: where the count actually goes
+
+The FDA feed counts pharmacies per *settlement*, not per address, so the raw
+overlay painted one city's 341 pharmacies onto a single centroid and every cell in
+the window inherited the same number — inside اهواز, کیانپارس and an empty
+outskirt looked identical.
+
+The count is therefore **redistributed over the pharmacies that are actually
+mapped**: each mapped point carries `settlement_total / n_mapped`, which keeps the
+provincial total exactly (884) and puts the weight where the stores are; a
+settlement with nothing mapped keeps its whole count on the centroid. Same rule on
+both sides: `etl/build_map_layer.py` for the region grid, `KhuzestanMap` for the
+zoom-dependent grid.
+
+Two consequences worth knowing:
+
+* the fine grid measures **pharmacies per km²** (a spatial question), not
+  residents per pharmacy — population is known per settlement only, so a per-capita
+  ratio is flat across a city by construction;
+* the residential mask grows with population (`0.9·√(pop/1000)` km, 2.5–12 km),
+  because a 1.2 M city is an area, not a 1.5 km dot;
+* colour is capped at the 95th percentile, otherwise one dense block washes every
+  other district to the palest step.
+
 ### Pharmacy profiles and the demand side
 
 Two more tables sit beside the map layer:

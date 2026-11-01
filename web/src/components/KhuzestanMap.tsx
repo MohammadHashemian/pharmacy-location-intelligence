@@ -48,7 +48,7 @@ const COLORS = {
 
 /* density ramps: low → high. The first stop is nearly transparent so an empty
    area stays "no data" instead of "healthy". */
-const DENS_RAMP = ["#f2fdfb", "#ccfbf1", "#5eead4", "#14b8a6", "#0d9488"];
+const DENS_RAMP = ["#f2fdfb", "#99f6e4", "#2dd4bf", "#0d9488", "#115e59"];
 const GAP_RAMP = ["#fef3c7", "#fcd34d", "#fb923c", "#f43f5e", "#9f1239"];
 
 function ramp(stops: string[], t: number): string {
@@ -340,6 +340,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     if (pid) {
       const i = data.pharmacies.findIndex((p) => p.id === pid);
       if (i >= 0) setSelPharm(i);
+    }
+    const dlat = Number(q.get("lat"));
+    const dlon = Number(q.get("lon"));
+    if (Number.isFinite(dlat) && Number.isFinite(dlon) && dlat && dlon) {
+      const [x, y] = scene.proj(dlat, dlon);
+      const kz = Math.max(1, Math.min(MAX_ZOOM, Number(q.get("k")) || 8));
+      commit(kz, W / 2 - x * kz, H / 2 - y * kz);
     }
     const mid = q.get("med");
     if (mid) {
@@ -983,6 +990,33 @@ export function KhuzestanMap({ data }: { data: MapData }) {
      Above 4x this recomputes the same measure on a 1 km grid over the visible
      box only, straight from the settlement list — population and pharmacies
      within 3 km, cells kept only where a settlement is within 1.2 km. */
+  /* Supply points for the fine grid. A city's FDA count used to sit on one
+     centroid, so داخل the city every 1 km cell inherited the same number and
+     کیانپارس looked like the desert. Each mapped pharmacy now carries
+     total / n_mapped (total preserved), and a settlement with nothing mapped
+     keeps its count on the centroid — same rule as etl/build_map_layer.py. */
+  const weightedSupply = useMemo(() => {
+    const byArea = new Map<number, { lat: number; lon: number }[]>();
+    for (const p of data.pharmacies) {
+      if (p.areaId == null) continue;
+      const list = byArea.get(p.areaId);
+      if (list) list.push({ lat: p.lat, lon: p.lon });
+      else byArea.set(p.areaId, [{ lat: p.lat, lon: p.lon }]);
+    }
+    const out: { lat: number; lon: number; w: number }[] = [];
+    for (const st of settlements) {
+      if (!st.ph) continue;
+      const here = byArea.get(st.id) ?? [];
+      if (here.length) {
+        const w = st.ph / here.length;
+        for (const q of here) out.push({ lat: q.lat, lon: q.lon, w });
+      } else {
+        out.push({ lat: st.lat, lon: st.lon, w: st.ph });
+      }
+    }
+    return out;
+  }, [data.pharmacies, settlements]);
+
   const fineCells = useMemo(() => {
     if (settled.k < 1.8) return null;
     const x0 = -settled.tx / settled.k;
@@ -1008,6 +1042,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     const dLon = stepKm / (111.32 * Math.cos((((latHi + latLo) / 2) * Math.PI) / 180));
 
     // bucket the settlements on 3 km cells: the window is 3 km
+    /* A city is an area, not a point: masking cells to 1.5 km around the single
+       centroid of اهواز deleted every district (کیانپارس is 4 km out). The mask
+       grows with population — the usual built-up radius of a town. */
+    const maskKm = settlements.map((st) =>
+      Math.max(2.5, Math.min(12, 0.9 * Math.sqrt(Math.max(0, st.pop ?? 0) / 1000))),
+    );
+
     const b: Map<number, number[]> = new Map();
     const key = (la: number, lo: number) => Math.floor(la / 0.03) * 100000 + Math.floor(lo / 0.03);
     settlements.forEach((s, i) => {
@@ -1015,6 +1056,14 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       const list = b.get(kk);
       if (list) list.push(i);
       else b.set(kk, [i]);
+    });
+
+    const wb: Map<number, number[]> = new Map();
+    weightedSupply.forEach((p, i) => {
+      const kk = key(p.lat, p.lon);
+      const list = wb.get(kk);
+      if (list) list.push(i);
+      else wb.set(kk, [i]);
     });
 
     const R = 6371.0088;
@@ -1041,23 +1090,50 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             for (const i of b.get(key(la + oa * 0.03, lo + ol * 0.03)) ?? []) {
               const s = settlements[i];
               const d = dist(la, lo, s.lat, s.lon);
-              if (d <= 1.5) near = 1;
+              if (d <= maskKm[i]) near = 1;
               if (d <= 3) {
                 pop += s.pop ?? 0;
-                ph += s.ph;
                 n += 1;
               }
             }
           }
         }
-        if (!near || pop <= 0) continue;
-        const v = mode === "dens" ? (ph / pop) * 1e4 : Math.max(0, pop / targetPerPharm - ph);
+        /* Two different questions, two kernels:
+           - «تراکم داروخانه» inside a city is a SPATIAL question (how many shops
+             per km²). Population is only known per settlement, and اهواز's 1.2 M
+             people sit on one point, so a per-capita ratio is flat across the
+             whole city and never shows that کیانپارس has a pharmacy every 200 m.
+           - «شکاف ظرفیت» stays per-capita, which is the right unit for a region.
+        */
+        const R = mode === "dens" ? 1.5 : 3;
+        for (let oa = -1; oa <= 1; oa++) {
+          for (let ol = -1; ol <= 1; ol++) {
+            for (const i of wb.get(key(la + oa * 0.03, lo + ol * 0.03)) ?? []) {
+              const q = weightedSupply[i];
+              if (dist(la, lo, q.lat, q.lon) <= R) ph += q.w;
+            }
+          }
+        }
+        if (!near) continue;
+        if (mode === "gap" && pop <= 0) continue;
+        const areaKm2 = Math.PI * R * R;
+        const v =
+          mode === "dens"
+            ? ph / areaKm2
+            : Math.max(0, pop / targetPerPharm - ph);
         if (v > maxV) maxV = v;
         const [cx, cy] = scene.proj(la, lo);
         out.push({ x: cx, y: cy, v, pop, ph, n });
       }
     }
-    return { cells: out, max: maxV, stepKm, dLat, dLon };
+    /* Colour is capped at the 95th percentile: one dense block (the bazaar
+       cluster in اهواز reaches ~10x the city median) otherwise washes every other
+       district to the palest step and the map reads as empty. */
+    const sorted = out.map((c) => c.v).sort((a, b) => a - b);
+    const cap = sorted.length
+      ? Math.max(1e-6, sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))])
+      : 1;
+    return { cells: out, max: maxV, cap, stepKm, dLat, dLon };
   }, [settled, scene, settlements, mode, targetPerPharm]);
 
   /* Roads: culled to the viewport and to the class the zoom level needs, then
@@ -1544,10 +1620,22 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                       y={c.y - (fineCells.dLat * scene.scale) / 2}
                       width={fineCells.dLon * scene.kx + 0.25}
                       height={fineCells.dLat * scene.scale + 0.25}
-                      fill={ramp(mode === "dens" ? DENS_RAMP : GAP_RAMP, c.v / fineCells.max)}
-                      /* low-value cells fade instead of painting white blocks
-                         that read as buildings on a pale basemap */
-                      fillOpacity={0.10 + 0.38 * Math.min(1, c.v / fineCells.max)}
+                      /* Three states, because "no pharmacy mapped" and "few
+                         pharmacies" used to look identical: grey = residential
+                         with no mapped supply, teal = supply, nothing = no data. */
+                      fill={
+                        mode === "dens" && c.v <= 0
+                          ? "#e2e8f0"
+                          : ramp(
+                              mode === "dens" ? DENS_RAMP : GAP_RAMP,
+                              Math.min(1, c.v / fineCells.cap),
+                            )
+                      }
+                      fillOpacity={
+                        mode === "dens" && c.v <= 0
+                          ? 0.5
+                          : 0.35 + 0.5 * Math.min(1, c.v / fineCells.cap)
+                      }
                     />
                   ))}
                 </g>
@@ -1814,7 +1902,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 <span key={c} className="flex-1" style={{ background: c }} />
               ))}
             </span>
-            {mode === "dens" ? "تراکم کم → زیاد" : "شکاف کم → زیاد"}
+            {mode === "dens"
+              ? view.k >= 1.8
+                ? "داروخانه در هر کم² (۱٫۵ کم) · خاکستری = مسکونی بدون داروخانهٔ نقشه‌شده"
+                : "داروخانه به ازای ۱۰٬۰۰۰ نفر"
+              : "شکاف ظرفیت کم → زیاد"}
             <span className="text-faint">
               {view.k >= 3.4 ? "· شبکهٔ ۱ کم" : `· فقط مسکونی`}
             </span>

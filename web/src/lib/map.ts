@@ -117,6 +117,8 @@ export type MapPharmacy = {
   km: number;
   settlement: string | null;
   county: string | null;
+  /** id of the settlement it was matched to — the density weighting needs it. */
+  areaId: number | null;
   /** null until `etl/enrich_pharmacy_profiles.py` has run for this place. */
   profile: MapPharmacyProfile | null;
 };
@@ -357,6 +359,7 @@ export function loadMapData(): MapData {
     nearest_km: number | null;
     settlement: string | null;
     county: string | null;
+    area_id: number | null;
     address: string | null;
     phone: string | null;
     website: string | null;
@@ -370,7 +373,7 @@ export function loadMapData(): MapData {
     status: string | null;
   }>(`
     SELECT p.osm_type, p.osm_id, p.source, p.name, p.name_en, p.lat, p.lon,
-           p.nearest_km, a.name AS settlement, p.county,
+           p.nearest_km, a.name AS settlement, p.county, p.nearest_area_id AS area_id,
            f.address, f.phone, f.website, f.rating, f.reviews, f.price_level,
            f.hours_json, f.photos_json, f.summary, f.maps_uri, f.status
     FROM map_pharmacy p
@@ -388,6 +391,7 @@ export function loadMapData(): MapData {
     km: p.nearest_km ?? 0,
     settlement: p.settlement,
     county: p.county,
+    areaId: p.area_id,
     profile: p.rating === null && p.website === null && p.phone === null
       ? null
       : {
