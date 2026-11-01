@@ -371,6 +371,32 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Roads must exist at every zoom (`tools/test_roads_zoom.py`)
+
+Three layers can carry a road: `roads` (motorway…secondary, province-wide), `connectors`
+(tertiary/unclassified) and `streets` (one city's network). «The roads jump when I zoom»
+was three separate things, all measured with a zoom ladder at four places:
+
+1. **A gate at 1.25×** dropped the entire road network when zooming back out to the
+   province view. Roads now draw from **1.0×**, connectors from **1.0×** as well.
+2. **The 3.9 MB connector file was fetched only once the view passed 1.4×**, so the roads
+   popped in mid-zoom. It loads at mount now.
+3. **The city street file started at 2.5×** and drew at 3.2×; it now loads from 1.6×.
+
+The first version of this test reported 56 «missing» levels that were not missing — it was
+measuring a half-loaded map (1.5 MB of roads, 3.6 MB of connectors, 1 MB of streets). The
+map now exposes `data-ready="1"` on `g#scene` when its data has landed, and the test waits
+for the layer it is about to assert on.
+
+```bash
+python tools/test_roads_zoom.py              # 15 zooms × 4 places, reload each time
+python tools/test_roads_zoom.py --transition # wheel-zoom, no reload, the reported case
+python tools/test_roads_zoom.py --shots
+```
+
+Result: a road is painted at **every** zoom from 1.0× to 28×, at اهواز, ویس, دزفول and an
+open highway point — and stays painted through a wheel transition from 1.6× to 40× and back.
+
 ### Where to open (`etl/rank_sites.py`)
 
 The map is descriptive until this runs. It scores every candidate over a 1.2 km catchment

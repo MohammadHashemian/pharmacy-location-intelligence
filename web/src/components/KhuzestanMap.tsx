@@ -524,7 +524,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   }, [mode, popCells]);
 
   useEffect(() => {
-    if (!layers.streets || connectors || settled.k < 1.4) return;
+    if (!layers.streets || connectors) return;
     let alive = true;
     fetch("/geo/streets_connectors.json")
       .then((r) => (r.ok ? r.json() : null))
@@ -549,7 +549,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
      showed density cells over imagery and no streets at all — the exact zoom a user
      reaches first when they zoom into a town. */
   useEffect(() => {
-    if (!layers.streets || settled.k < 2.5) {
+    if (!layers.streets || settled.k < 1.6) {
       if (streetLines.length) setStreetLines([]);
       return;
     }
@@ -1246,7 +1246,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   }, [connectors, scene]);
 
   const connectorLayer = useMemo(() => {
-    if (!layers.streets || !connectorPts || view.k < 1.4) return null;
+    if (!layers.streets || !connectorPts) return null;
     const vb = visibleBox();
     const bx0 = (vb.x0 - view.tx) / view.k - 20 / view.k;
     const by0 = (vb.y0 - view.ty) / view.k - 20 / view.k;
@@ -1638,7 +1638,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   /* Roads: culled to the viewport and to the class the zoom level needs, then
      concatenated into two paths — 8k <path> nodes would choke the renderer. */
   const roadLayer = useMemo(() => {
-    if (!roads || view.k < 1.25) return null;
+    if (!roads) return null;
     const pad = 20 / view.k;
     const heavy: string[] = [];
     const light: string[] = [];
@@ -2141,6 +2141,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             </defs>
             <g
               id="scene"
+              /* Tests (and the user) need to know when the async layers have landed;
+                 measuring a half-loaded map is how «roads disappear at some zooms»
+                 got reported in the first place. */
+              data-ready={roads && settlements.length ? "1" : "0"}
               transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}
             >
               {satTiles ? (
