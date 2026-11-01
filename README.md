@@ -955,7 +955,7 @@ importer probes **both** and uses whichever answers:
 ```bash
 python etl/import_pharmacies.py --check     # prints "nearby" or "search", or the 485 fix
 python etl/import_pharmacies.py --fixture data/sample/neshan.json   # offline pipeline
-python etl/verify_import.py                 # 21 assertions, no network
+python etl/verify_import.py                 # 30 assertions, no network
 ```
 
 Errors seen in practice and what they mean:
@@ -966,6 +966,32 @@ Errors seen in practice and what they mean:
 | **483** | `API Key type not suitable for this service` — a **web**/SDK key (`web.…`) was stored; SDK keys are bound to a browser domain and refuse every server call | create a key of type **سرویس** (`service.…`) |
 | **485** | `Api Key services not match` — the key is scoped to another service (e.g. reverse geocoding works, search does not) | create a key for **جستجو / Search** in the Neshan panel; their docs say activation needs a **support ticket** |
 | 481/482 | quota / rate limit | wait or upgrade the plan |
+
+### Google Places (New) — implemented, but read the legal line first
+
+The importer speaks Google too (`--provider google`), because the pipeline is the
+same once a provider returns `lat/lng/name`:
+
+```bash
+python etl/import_pharmacies.py --provider google --check
+python etl/import_pharmacies.py --provider google --dry-run --limit 5
+python etl/import_pharmacies.py --provider google            # 87 cities, ≤3 pages each
+```
+
+* **Key**: `/settings` → the **Google Places** row. Create it in Google Cloud:
+  enable **Places API (New)**, attach a **billing account**, then restrict the key
+  to Places API (New) with **no HTTP-referer restriction** (this is a server call).
+* **Cost** (list price, per 1,000 events): Nearby Search **Pro** and Text Search
+  **Pro** both carry **5,000 free events a month**, then **$32**. A full Khuzestan
+  run is ~90–260 calls → **$0** inside the free cap; `--min-pop 2000` roughly
+  triples the calls and still fits.
+* **Legal**: Iran is a **Prohibited Territory** in Google's own terms
+  ([`maps-prohibited-territories`](https://cloud.google.com/maps-platform/terms/maps-prohibited-territories):
+  China, Crimea, Cuba, Donetsk, **Iran**, Luhansk, North Korea, Syria, Vietnam).
+  Google Maps Core Services may not be used to build or distribute an application
+  for that territory, and a billing account cannot be opened from Iran. Use this
+  provider only if the deployment is genuinely outside those terms — otherwise
+  Neshan (Iranian) or OSM is the correct source.
 
 ### Known limits
 

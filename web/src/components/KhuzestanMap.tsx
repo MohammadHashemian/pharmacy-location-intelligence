@@ -1408,7 +1408,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     ? "OSM"
                     : data.pharmacies[hoverPharm.i].source === "neshan"
                       ? "نشان"
-                      : data.pharmacies[hoverPharm.i].source}
+                      : data.pharmacies[hoverPharm.i].source === "google"
+                        ? "گوگل"
+                        : data.pharmacies[hoverPharm.i].source}
                 </span>
               </div>
               <div className="text-[10.5px] text-muted">

@@ -115,16 +115,33 @@ export async function POST(req: Request) {
     });
     const text = await r.text();
     if (!r.ok) {
+      // Google puts the reason in error.status; "403" alone tells you nothing.
+      let reason = "";
+      let message = "";
+      try {
+        const e = JSON.parse(text) as { error?: { status?: string; message?: string } };
+        reason = e.error?.status ?? "";
+        message = e.error?.message ?? "";
+      } catch {
+        /* not JSON */
+      }
+      const low = `${reason} ${message}`.toLowerCase();
+      const error =
+        reason === "SERVICE_DISABLED" || low.includes("has not been used in project")
+          ? "Places API (New) برای این پروژه فعال نیست — در Google Cloud Console → APIs & Services آن را Enable کنید"
+          : reason === "API_KEY_INVALID" || reason === "API_KEY_SERVICE_BLOCKED"
+            ? "کلید گوگل نامعتبر است یا برای Places مسدود شده"
+            : reason === "INVALID_ARGUMENT"
+              ? "کلید یا درخواست نامعتبر است — شکل کلید Google API باید با AIza شروع شود و Places API (New) روی همان پروژه فعال باشد"
+            : low.includes("billing")
+              ? "صورتحساب پروژه وصل نیست — گوگل حتی برای سهمیهٔ رایگان هم کارت می‌خواهد"
+              : low.includes("referer") || low.includes("ip, site or mobile application")
+                ? "کلید به Referer/IP محدود شده — برای فراخوانی سروری، محدودیت کلید را بردارید"
+                : r.status === 403
+                  ? "دسترسی رد شد — کلید، صورتحساب یا فعال‌سازی Places را بررسی کنید"
+                  : `Google پاسخ ${r.status} داد`;
       return NextResponse.json(
-        {
-          ok: false,
-          status: r.status,
-          error:
-            r.status === 403
-              ? "کلید معتبر نیست یا Places API فعال نشده / صورتحساب وصل نیست"
-              : `Google پاسخ ${r.status} داد`,
-          detail: text.slice(0, 300),
-        },
+        { ok: false, status: r.status, reason, error, detail: text.slice(0, 300) },
         { status: 200 },
       );
     }

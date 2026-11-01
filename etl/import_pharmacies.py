@@ -1,30 +1,32 @@
-"""Import pharmacy points from نشان (Neshan) into `map_pharmacy`.
+"""Import pharmacy points into `map_pharmacy` from a POI provider.
 
-Two Neshan services can answer "what is near this point", and a key is bound to
-whichever one it was created for, so this script probes both and uses the first
-that the key can call:
+Two providers, one pipeline (filter → clip → dedupe → match → write):
 
-  /v1/nearby   ?location=lat,lng&radius=<m>[&layer=...]   (مکان‌های نزدیک)
-  /v3/search   ?q=<json {term, center:{latitude,longitude}}> (جستجو, ≤30 results)
+  --provider neshan   /v1/nearby or /v3/search, service key (`service.…`), Iran-legal.
+                      Returns ≤30 per request, no paging.
+  --provider google   Places API (New) places:searchText, key from Google Cloud.
+                      Max 20 per page, up to 3 pages (60) per centre.
+                      NOTE: Iran is a *Prohibited Territory* in Google's ToS
+                      (cloud.google.com/maps-platform/terms/maps-prohibited-territories),
+                      and billing needs a card Google will accept — see README before
+                      spending money on it.
 
-Both return `items[]` with `title/address/category/type/location{x,y}/poiHash`.
-The key is read from the app's own settings table (entered at /settings).
+Keys are read from the app's own settings table (entered at /settings), so they are
+never copied into a file or a shell history.
 
-    python etl/import_pharmacies.py --check            # which service does the key have?
-    python etl/import_pharmacies.py --dry-run --limit 5
-    python etl/import_pharmacies.py                    # 87 cities
-    python etl/import_pharmacies.py --min-pop 2000     # + larger villages
-    python etl/import_pharmacies.py --fixture data/sample/neshan_nearby.json  # offline
+    python etl/import_pharmacies.py --provider google --check
+    python etl/import_pharmacies.py --provider google --dry-run --limit 5
+    python etl/import_pharmacies.py --provider google              # 87 cities
+    python etl/import_pharmacies.py --provider google --min-pop 2000
+    python etl/import_pharmacies.py --provider google --fixture data/sample/google.json
 
-Deduping (the reason this is not a 20-line loop):
+Deduping (why this is longer than a loop over the API):
   1. exact point      two results within 30 m are the same POI
   2. same name        «داروخانه دکتر بدری» and «دکتر بدری» within 150 m are one
-  3. cross-source     a Neshan point within 60 m of an existing OSM pharmacy is
-                      already on the map — it is counted, not duplicated
-  4. irrelevant       a street/square/village called «داروخانه» is not a pharmacy
-
-Rows land in `map_pharmacy` with `source='neshan'`; `build_map_layer.py` only
-replaces `source='osm'`, so an import survives a rebuild and /map picks it up.
+  3. cross-source     a point within 60 m of a pharmacy already on the map (OSM, or a
+                      previous provider) is counted, not duplicated
+  4. irrelevant       a street/square/village called «داروخانه» is not a pharmacy;
+                      Google's CLOSED_PERMANENTLY is skipped too
 """
 from __future__ import annotations
 
@@ -47,6 +49,15 @@ UA = {"User-Agent": "pharmacy-location-intelligence/1.0 (research; site selectio
 
 NEARBY = "https://api.neshan.org/v1/nearby"
 SEARCH = "https://api.neshan.org/v3/search"
+GOOGLE_TEXT = "https://places.googleapis.com/v1/places:searchText"
+GOOGLE_MASK = (
+    "places.id,places.displayName,places.formattedAddress,places.location,"
+    "places.types,places.businessStatus,nextPageToken"
+)
+
+# Google's Pro SKU: 5,000 free events a month, then $32 per 1,000 (2026 list price).
+GOOGLE_FREE_MONTH = 5_000
+GOOGLE_USD_PER_CALL = 0.032
 
 # «داروخانه» also names streets, squares and clinics. A name hit alone is not
 # enough: the POI type must not be a place/road class.
@@ -55,10 +66,9 @@ NON_PHARMACY_TYPES = {
     "street", "road", "highway", "motorway", "residential", "square", "plaza",
     "neighbourhood", "neighborhood", "locality", "city", "town", "village",
     "hospital", "clinic", "polyclinic", "bus_station", "subway", "park",
-    "address", "place_of_worship", "school", "university",
+    "address", "place_of_worship", "school", "university", "route", "street_address",
 }
 
-# fallback coordinates if the provider ever returns a bare item without a city
 ZWNJ = "\u200c"
 
 
@@ -91,12 +101,7 @@ def normalize_name(name: str) -> str:
 
 def dedupe_points(points: list[dict], same_px_km: float = 0.03,
                   same_name_km: float = 0.15) -> tuple[list[dict], dict[str, int]]:
-    """Collapse duplicates: identical points, and the same pharmacy named twice.
-
-    Neshan returns one POI per branch, but the same branch can come back from two
-    neighbouring search centres with a slightly different title; without this the
-    map gets two diamonds on one shop.
-    """
+    """Collapse duplicates: identical points, and the same pharmacy named twice."""
     kept: list[dict] = []
     stats = {"exact": 0, "same_name": 0}
     for p in sorted(points, key=lambda x: (x["name"], x["lat"], x["lon"])):
@@ -146,7 +151,7 @@ def inside_outline(lat: float, lon: float) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# provider calls
+# نشان (Neshan)
 # --------------------------------------------------------------------------- #
 def _get(url: str, key: str) -> tuple[int, dict | str]:
     req = urllib.request.Request(url, headers={**UA, "Api-Key": key})
@@ -193,12 +198,11 @@ def item_to_point(it: dict) -> dict | None:
     }
 
 
-# --------------------------------------------------------------------------- #
-def detect_service(key: str, lat: float, lon: float) -> str | None:
-    code, items = call_nearby(key, lat, lon, 800)
+def detect_neshan(key: str, lat: float, lon: float) -> str | None:
+    code, _ = call_nearby(key, lat, lon, 800)
     if code == 200:
         return "nearby"
-    code2, items2 = call_search(key, "داروخانه", lat, lon)
+    code2, _ = call_search(key, "داروخانه", lat, lon)
     if code2 == 200:
         return "search"
     last = code2 if code2 != 200 else code
@@ -216,38 +220,129 @@ def detect_service(key: str, lat: float, lon: float) -> str | None:
     return None
 
 
+# --------------------------------------------------------------------------- #
+# Google Places (New)
+# --------------------------------------------------------------------------- #
+def call_google(key: str, term: str, lat: float, lon: float, radius_m: int,
+                page_token: str | None = None) -> tuple[int, list[dict], str | None, str]:
+    body: dict = {
+        "textQuery": term,
+        "languageCode": "fa",
+        "regionCode": "IR",
+        "includedType": "pharmacy",
+        "maxResultCount": 20,
+        "locationBias": {
+            "circle": {"center": {"latitude": lat, "longitude": lon}, "radius": radius_m}
+        },
+    }
+    if page_token:
+        body["pageToken"] = page_token
+    req = urllib.request.Request(
+        GOOGLE_TEXT,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        method="POST",
+        headers={
+            **UA,
+            "X-Goog-Api-Key": key,
+            "X-Goog-FieldMask": GOOGLE_MASK,
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            payload = json.loads(r.read().decode("utf-8"))
+        return 200, payload.get("places") or [], payload.get("nextPageToken"), ""
+    except urllib.error.HTTPError as e:
+        return e.code, [], None, e.read().decode("utf-8", "ignore")[:300]
+    except Exception as e:  # noqa: BLE001
+        return 0, [], None, str(e)[:200]
+
+
+def google_item_to_point(pl: dict) -> dict | None:
+    loc = pl.get("location") or {}
+    lat, lon = loc.get("latitude"), loc.get("longitude")
+    if lat is None or lon is None:
+        return None
+    if pl.get("businessStatus") == "CLOSED_PERMANENTLY":
+        return None
+    name = ((pl.get("displayName") or {}).get("text") or "").strip()
+    types = " ".join(pl.get("types") or []).lower()
+    # Same rule as the Neshan side: a name hit is not enough, because «خیابان
+    # داروخانه» is typed «route» and a hospital carries its own types.
+    if not looks_like_pharmacy(name, types, ""):
+        return None
+    if not inside_outline(float(lat), float(lon)):
+        return None
+    return {
+        "name": name or "داروخانه",
+        "lat": round(float(lat), 6),
+        "lon": round(float(lon), 6),
+        "address": pl.get("formattedAddress"),
+        "hash": pl.get("id"),
+        "type": "pharmacy",
+    }
+
+
+def detect_google(key: str, lat: float, lon: float) -> bool:
+    code, places, _, detail = call_google(key, "داروخانه", lat, lon, 15000)
+    if code == 200:
+        print(f"google: OK · {len(places)} places in the first page")
+        return True
+    if code == 403:
+        low = detail.lower()
+        if "billing" in low or "not enabled" in low or "service_disabled" in low:
+            print("google: HTTP 403 — Places API (New) is not enabled for this project,")
+            print("  or the project has no billing account. Google requires a card even")
+            print("  for the free 5,000 calls a month.")
+        elif "referer" in low or "api_key" in low or "invalid" in low:
+            print("google: HTTP 403 — key rejected. Restrict it to «Places API (New)»")
+            print("  and allow server requests (no HTTP-referer restriction).")
+        else:
+            print(f"google: HTTP 403 — {detail[:200]}")
+    else:
+        print(f"google: HTTP {code} — {detail[:200]}")
+    return False
+
+
+# --------------------------------------------------------------------------- #
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--provider", choices=["neshan", "google"], default="neshan")
     ap.add_argument("--term", default="داروخانه")
-    ap.add_argument("--radius", type=int, default=1500, help="nearby radius, metres")
+    ap.add_argument("--radius", type=int, default=1500, help="neshan nearby radius, m")
+    ap.add_argument("--radius-km", type=float, default=20.0, help="google text-search bias")
+    ap.add_argument("--pages", type=int, default=3, help="google: pages of 20 per centre")
     ap.add_argument("--service", choices=["nearby", "search"], default=None)
     ap.add_argument("--min-pop", type=int, default=0,
                     help="also query at villages with at least this population")
     ap.add_argument("--cities-only", action="store_true")
     ap.add_argument("--limit", type=int, default=0, help="first N centres (pilot)")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--check", action="store_true", help="only report which service the key has")
+    ap.add_argument("--check", action="store_true", help="only test the key")
     ap.add_argument("--fixture", default=None,
-                    help="offline: a saved Neshan response (or list of items) instead of the API")
+                    help="offline: a saved provider response instead of the API")
     ap.add_argument("--pause", type=float, default=0.35)
+    ap.add_argument("--page-pause", type=float, default=2.0, help="google pageToken wait")
     ap.add_argument("--keep-unmatched", action="store_true")
     args = ap.parse_args()
 
     c = sqlite3.connect(DB)
-    key = None if args.fixture else (c.execute(
-        "SELECT value FROM app_setting WHERE key='neshan_api_key'").fetchone() or [None])[0]
+    setting_key = "google_places_key" if args.provider == "google" else "neshan_api_key"
+    key = None if args.fixture else (
+        c.execute("SELECT value FROM app_setting WHERE key=?", (setting_key,)).fetchone()
+        or [None])[0]
     if not args.fixture and not key:
-        print("no neshan_api_key in app_setting — enter it at /settings first")
+        print(f"no {setting_key} in app_setting — enter it at /settings first")
         return 2
 
     cities = c.execute("""
-        SELECT a.name, p.lat, p.lon, COALESCE(a.population, 0)
+        SELECT a.name, p.lat, p.lon
         FROM v_admin_area_current a
         JOIN map_point p ON p.area_id = a.area_id
         WHERE a.kind = 'city'
         ORDER BY COALESCE(a.population, 0) DESC
     """).fetchall()
-    centres = [(n, la, lo) for n, la, lo, _pop in cities]
+    centres = [(n, la, lo) for n, la, lo in cities]
 
     if not args.cities_only and args.min_pop:
         villages = c.execute("""
@@ -261,37 +356,78 @@ def main() -> int:
 
     if args.limit:
         centres = centres[: args.limit]
+    if not centres:
+        print("no centres")
+        return 1
 
     if args.check:
-        if not centres:
-            print("no centres")
-            return 1
-        name, la, lo = centres[0]
-        service = detect_service(key, la, lo)
-        print(f"service: {service or 'none'}")
-        return 0 if service else 3
+        if args.provider == "google":
+            return 0 if detect_google(key, centres[0][1], centres[0][2]) else 3
+        print(f"service: {detect_neshan(key, centres[0][1], centres[0][2]) or 'none'}")
+        return 0
 
     raw_points: list[dict] = []
+    calls = 0
+
     if args.fixture:
         payload = json.load(open(args.fixture, encoding="utf-8"))
-        items = payload.get("items") if isinstance(payload, dict) else payload
-        for it in items or []:
-            p = item_to_point(it)
-            if p:
-                raw_points.append(p)
+        if args.provider == "google":
+            items = payload.get("places") if isinstance(payload, dict) else payload
+            for pl in items or []:
+                p = google_item_to_point(pl)
+                if p:
+                    raw_points.append(p)
+        else:
+            items = payload.get("items") if isinstance(payload, dict) else payload
+            for it in items or []:
+                p = item_to_point(it)
+                if p:
+                    raw_points.append(p)
         print(f"fixture: {len(items or [])} items -> {len(raw_points)} pharmacy points")
+
+    elif args.provider == "google":
+        print(f"google: {len(centres)} centres · up to {args.pages} pages of 20 each")
+        codes: dict[int, int] = {}
+        for i, (name, la, lo) in enumerate(centres, 1):
+            token, page = None, 0
+            while page < args.pages:
+                code, places, token, detail = call_google(
+                    key, args.term, la, lo, int(args.radius_km * 1000), token)
+                codes[code] = codes.get(code, 0) + 1
+                calls += 1
+                if code != 200:
+                    if code in (401, 403):
+                        print(f"stopped at {name}: HTTP {code} {detail[:160]}")
+                        detect_google(key, la, lo)
+                        return 3
+                    time.sleep(1.0)
+                    break
+                for pl in places:
+                    p = google_item_to_point(pl)
+                    if p:
+                        raw_points.append(p)
+                page += 1
+                if not token:
+                    break
+                time.sleep(args.page_pause)
+            if i % 10 == 0:
+                print(f"  [{i}/{len(centres)}] {name}: points so far {len(raw_points)}")
+            time.sleep(args.pause)
+        print(f"HTTP {dict(sorted(codes.items()))}")
+
     else:
-        service = args.service or detect_service(key, centres[0][1], centres[0][2])
+        service = args.service or detect_neshan(key, centres[0][1], centres[0][2])
         if not service:
             return 3
         print(f"service: {service} · {len(centres)} centres")
-        codes: dict[int, int] = {}
+        codes = {}
         for i, (name, la, lo) in enumerate(centres, 1):
             if service == "nearby":
                 code, items = call_nearby(key, la, lo, args.radius)
             else:
                 code, items = call_search(key, args.term, la, lo)
             codes[code] = codes.get(code, 0) + 1
+            calls += 1
             if code != 200:
                 if code in (401, 403, 480, 483, 485):
                     print(f"stopped at {name}: HTTP {code}")
@@ -312,11 +448,18 @@ def main() -> int:
     print(f"{len(points)} unique pharmacies from {len(raw_points)} results "
           f"(dropped {dup_stats['exact']} same-point, {dup_stats['same_name']} same-name)")
 
+    if args.provider == "google" and calls:
+        free_left = max(0, GOOGLE_FREE_MONTH - calls)
+        print(f"calls: {calls} · free tier {GOOGLE_FREE_MONTH}/month → "
+              f"${max(0, calls - GOOGLE_FREE_MONTH) * GOOGLE_USD_PER_CALL:.2f} "
+              f"({free_left} free calls left this month)")
+
     settlements = c.execute("""
         SELECT p.area_id, p.lat, p.lon, a.county FROM map_point p
         JOIN v_admin_area_current a ON a.area_id = p.area_id
     """).fetchall()
-    osm = c.execute("SELECT lat, lon FROM map_pharmacy WHERE source='osm'").fetchall()
+    existing = c.execute(
+        "SELECT lat, lon FROM map_pharmacy WHERE source != ?", (args.provider,)).fetchall()
 
     rows, matched, dropped, dupes = [], 0, 0, 0
     for p in points:
@@ -325,21 +468,19 @@ def main() -> int:
             d = haversine_km(p["lat"], p["lon"], slat, slon)
             if d < best_d:
                 best_id, best_d, best_county = area_id, d, county
-        near_osm = any(haversine_km(p["lat"], p["lon"], la, lo) <= 0.06 for la, lo in osm)
-        if near_osm:
+        if any(haversine_km(p["lat"], p["lon"], la, lo) <= 0.06 for la, lo in existing):
             dupes += 1
             continue
         if best_d > 3.0 and not args.keep_unmatched:
             dropped += 1
             continue
         rows.append((
-            "neshan", point_id(p["lat"], p["lon"], p["hash"]), p["name"], None,
-            p["lat"], p["lon"], best_id, round(best_d, 2), best_county,
-            p.get("address"),
+            args.provider, point_id(p["lat"], p["lon"], p["hash"]), p["name"], None,
+            p["lat"], p["lon"], best_id, round(best_d, 2), best_county, p.get("address"),
         ))
         matched += best_d <= 3.0
 
-    print(f"to write: {len(rows)} · already in OSM within 60 m: {dupes} · "
+    print(f"to write: {len(rows)} · already on the map within 60 m: {dupes} · "
           f"too far from any settlement: {dropped} · within 3 km: {matched}")
     if args.dry_run or args.fixture:
         for r in rows[:10]:
@@ -353,10 +494,11 @@ def main() -> int:
         INSERT OR REPLACE INTO map_pharmacy
           (osm_type, osm_id, name, name_en, lat, lon, nearest_area_id, nearest_km,
            county, street, source)
-        VALUES (?,?,?,?,?,?,?,?,?,?, 'neshan')
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
     """, rows)
     c.commit()
-    print(f"wrote {len(rows)} rows (source='neshan') — /map reads them on the next request")
+    print(f"wrote {len(rows)} rows (source='{args.provider}') — /map reads them on the "
+          f"next request")
     return 0
 
 

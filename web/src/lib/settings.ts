@@ -18,7 +18,7 @@ export const PROVIDERS = [
   {
     key: "google_places_key",
     label: "Google Places",
-    hint: "کلید Places API — جایگزین با پوشش بیشتر، نیازمند فعال‌سازی صورتحساب",
+    hint: "کلید Places API (New) با صورتحساب. ۵٬۰۰۰ فراخوان در ماه رایگان؛ سرویس Near/Text Search در SKU «Pro» حدود $۳۲ برای هر ۱٬۰۰۰ فراخوان. توجه: ایران در فهرست Prohibited Territories گوگل است.",
     docs: "https://console.cloud.google.com/google/maps-apis",
   },
 ] as const;

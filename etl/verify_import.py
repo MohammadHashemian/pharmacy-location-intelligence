@@ -98,5 +98,48 @@ check("CLI dedupes to 2 points", "2 unique pharmacies" in log)
 os.unlink(path)
 os.unlink(f"{path}.log")
 
+# 6. Google Places (New) item mapping ------------------------------------------
+g_ok = m.google_item_to_point({
+    "id": "ChIJ123", "displayName": {"text": "داروخانه دکتر رضایی"},
+    "formattedAddress": "اهواز، کیانپارس", "types": ["pharmacy", "health"],
+    "location": {"latitude": 31.3203, "longitude": 48.6694}, "businessStatus": "OPERATIONAL",
+})
+check("google: keeps an open pharmacy", g_ok is not None and g_ok["hash"] == "ChIJ123")
+check("google: drops CLOSED_PERMANENTLY", m.google_item_to_point({
+    "id": "x", "displayName": {"text": "داروخانه تعطیل"}, "types": ["pharmacy"],
+    "location": {"latitude": 31.32, "longitude": 48.66}, "businessStatus": "CLOSED_PERMANENTLY",
+}) is None)
+check("google: drops a non-pharmacy type", m.google_item_to_point({
+    "id": "y", "displayName": {"text": "بیمارستان امام"}, "types": ["hospital"],
+    "location": {"latitude": 31.32, "longitude": 48.66}, "businessStatus": "OPERATIONAL",
+}) is None)
+check("google: drops a point in Basra", m.google_item_to_point({
+    "id": "z", "displayName": {"text": "صيدلية ام قصر"}, "types": ["pharmacy"],
+    "location": {"latitude": 30.037, "longitude": 47.919}, "businessStatus": "OPERATIONAL",
+}) is None)
+
+# the CLI path with --provider google --fixture must run, dedupe, and write nothing
+gfixture = {"places": [
+    {"id": "g1", "displayName": {"text": "داروخانه شبانه‌روزی مادر"}, "types": ["pharmacy"],
+     "location": {"latitude": 31.3203, "longitude": 48.6694}, "businessStatus": "OPERATIONAL"},
+    {"id": "g1", "displayName": {"text": "داروخانه شبانه‌روزی مادر"}, "types": ["pharmacy"],
+     "location": {"latitude": 31.3203, "longitude": 48.6694}, "businessStatus": "OPERATIONAL"},
+    {"id": "g2", "displayName": {"text": "خیابان داروخانه"}, "types": ["route"],
+     "location": {"latitude": 31.321, "longitude": 48.67}, "businessStatus": "OPERATIONAL"},
+    {"id": "g3", "displayName": {"text": "داروخانه دکتر بدری"}, "types": ["pharmacy"],
+     "location": {"latitude": 31.3311, "longitude": 48.6801}, "businessStatus": "OPERATIONAL"},
+]}
+with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+    json.dump(gfixture, f, ensure_ascii=False)
+    gpath = f.name
+rc = os.system(f'python "{os.path.join(HOME, "etl", "import_pharmacies.py")}" '
+               f'--provider google --fixture "{gpath}" > "{gpath}.log" 2>&1')
+glog = open(f"{gpath}.log", encoding="utf-8").read()
+check("CLI google --fixture exits 0", rc == 0)
+check("CLI google dedupes to 2 points", "2 unique pharmacies" in glog)
+check("CLI google reports what it would write", "to write:" in glog)
+os.unlink(gpath)
+os.unlink(f"{gpath}.log")
+
 print("\n" + ("verify: OK" if fails == 0 else f"verify: {fails} FAILED"))
 raise SystemExit(0 if fails == 0 else 1)
