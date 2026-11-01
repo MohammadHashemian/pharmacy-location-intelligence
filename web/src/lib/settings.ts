@@ -12,7 +12,7 @@ export const PROVIDERS = [
   {
     key: "neshan_api_key",
     label: "نشان (Neshan)",
-    hint: "کلید سرویس (service key) از platform.neshan.org — برای جستجوی داروخانه‌ها",
+    hint: "کلید سرویس «جستجو» (Search) از platform.neshan.org — کلیدی که فقط سرویس دیگری داشته باشد با خطای ۴۸۵ رد می‌شود؛ فعال‌سازی جستجو در نشان با تیکت پشتیبانی است.",
     docs: "https://platform.neshan.org",
   },
   {

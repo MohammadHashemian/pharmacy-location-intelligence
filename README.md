@@ -943,9 +943,19 @@ Two things to know: the key lives in the database, so deleting/rebuilding
 `db/pharmacy.sqlite` deletes it (re-enter it at `/settings`), and it is stored in
 plain text — the file is gitignored, but it is not encrypted at rest.
 
-نشان's search endpoint is `/v1/search`; `/v4/search` returns 404 and an invalid key
-returns **480** (`API Key not found or is not valid`), both handled by the test
-endpoint.
+نشان's Search API is **`/v3/search?q=<url-encoded JSON>`** (docs, 1404):
+`q = {"term", "center": {"latitude", "longitude"}}`, `Api-Key` header, **max 30
+results per request**, ordered by distance from the centre and with no paging — so
+a province-wide import is a grid of search centres, deduped afterwards.
+`/v1/search` and `/v4/search` are retired (485 / 404).
+
+Errors seen in practice and what they mean:
+
+| code | meaning | fix |
+|---|---|---|
+| 480 | `API Key not found or is not valid` | wrong/rotated key |
+| **485** | `Api Key services not match` — the key is scoped to another service (e.g. reverse geocoding works, search does not) | create a key for **جستجو / Search** in the Neshan panel; their docs say activation needs a **support ticket** |
+| 481/482 | quota / rate limit | wait or upgrade the plan |
 
 ### Known limits
 

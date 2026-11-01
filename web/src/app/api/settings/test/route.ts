@@ -29,11 +29,13 @@ export async function POST(req: Request) {
   const timeout = AbortSignal.timeout(20_000);
   try {
     if (key === "neshan_api_key") {
-      const url = new URL("https://api.neshan.org/v1/search");
-      url.searchParams.set("term", "داروخانه");
-      url.searchParams.set("lat", String(AHVAZ.lat));
-      url.searchParams.set("lng", String(AHVAZ.lon));
-      url.searchParams.set("radius", "5000");
+      // Neshan's current Search API: /v3/search with a JSON `q` (docs, 1404).
+      // /v1/search is retired and answers 485 for a key scoped to another service.
+      const q = JSON.stringify({
+        term: "داروخانه",
+        center: { latitude: AHVAZ.lat, longitude: AHVAZ.lon },
+      });
+      const url = `https://api.neshan.org/v3/search?q=${encodeURIComponent(q)}`;
       const r = await fetch(url, { headers: { "Api-Key": value }, signal: timeout });
       const text = await r.text();
       if (!r.ok) {
@@ -42,11 +44,13 @@ export async function POST(req: Request) {
             ok: false,
             status: r.status,
             error:
-              r.status === 480 || r.status === 401 || r.status === 403
-                ? "کلید پذیرفته نشد — کلید «سرویس» (service key) و فعال بودن سرویس جستجو را بررسی کنید"
-                : r.status === 481 || r.status === 482
-                  ? "سهمیهٔ درخواست نشان تمام شده (۴۸۱/۴۸۲)"
-                  : `نشان پاسخ ${r.status} داد`,
+              r.status === 485
+                ? "این کلید سرویس «جستجو» ندارد (485). در پنل نشان کلیدی با سرویس Search بسازید؛ فعال‌سازی جستجو با تیکت پشتیبانی انجام می‌شود."
+                : r.status === 480 || r.status === 401 || r.status === 403
+                  ? "کلید پذیرفته نشد — کلید سرویس را بررسی کنید"
+                  : r.status === 481 || r.status === 482
+                    ? "سهمیهٔ درخواست نشان تمام شده (۴۸۱/۴۸۲)"
+                    : `نشان پاسخ ${r.status} داد`,
             detail: text.slice(0, 300),
           },
           { status: 200 },
@@ -54,15 +58,15 @@ export async function POST(req: Request) {
       }
       const json = JSON.parse(text) as {
         count?: number;
-        items?: { title?: string; address?: string }[];
+        items?: { title?: string; address?: string; type?: string; category?: string }[];
       };
       return NextResponse.json({
         ok: true,
-        provider: "نشان",
+        provider: "نشان (Search /v3)",
         found: json.count ?? json.items?.length ?? 0,
         sample: (json.items ?? []).slice(0, 4).map((i) => ({
           title: i.title ?? "",
-          address: i.address ?? "",
+          address: [i.address, i.type].filter(Boolean).join(" · "),
         })),
       });
     }
