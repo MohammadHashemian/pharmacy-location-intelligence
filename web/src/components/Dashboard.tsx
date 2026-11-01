@@ -1,33 +1,32 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DashboardData } from "@/lib/data";
 import {
   DEFAULT_ECONOMICS,
   DEFAULT_TUNABLES,
-  exclusionReason,
   scorePlaces,
-  suspectPlaces,
   type ScoredPlace,
   type Tunables,
   type UnitEconomics,
 } from "@/lib/analytics";
 import { suggestPerCapita } from "@/lib/otc";
-import { group, irr, num, shortPlace } from "@/lib/format";
-import { jalaliFromIso } from "@/lib/jalali";
-import { Controls, PRESETS, wPct, type Preset } from "./Controls";
+import { group } from "@/lib/format";
+import { heldOutRows, summarize } from "@/lib/dashboardStats";
+import { Controls, type Preset } from "./Controls";
 import { DensityHistogram, ScatterChart, TopBars } from "./Charts";
 import { CountyView, WhiteSpace } from "./CountyView";
 import { DetailPanel } from "./DetailPanel";
 import { PlacesTable } from "./PlacesTable";
 import { PopulationSwitch } from "./PopulationSwitch";
 import { CompareBar, SourcePanel } from "./SourcePanel";
-import { Badge, Button, Card, Stat, Tabs } from "./ui";
+import { Button, Card, Tabs } from "./ui";
+import { DashboardHeader } from "./dashboard/Header";
+import { DataNotes } from "./dashboard/DataNotes";
+import { ALL_PROVINCES, ScopeBar } from "./dashboard/ScopeBar";
 
 type TabId = "rank" | "whitespace" | "counties" | "charts" | "data";
-const ALL = "__all__";
 
 export function Dashboard({ data }: { data: DashboardData }) {
   const router = useRouter();
@@ -47,7 +46,7 @@ export function Dashboard({ data }: { data: DashboardData }) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [pinned, setPinned] = useState<number[]>([]);
   const [query, setQuery] = useState("");
-  const [province, setProvince] = useState<string>(ALL);
+  const [province, setProvince] = useState<string>(ALL_PROVINCES);
   const [activePreset, setActivePreset] = useState<string | null>("balanced");
   const [showSettings, setShowSettings] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -61,13 +60,10 @@ export function Dashboard({ data }: { data: DashboardData }) {
     [data.places, tunables, economics],
   );
 
-  const {
-    rows: visible,
-    unwrapped: unwrappedIds,
-  } = useMemo(() => {
+  const { rows: visible, unwrapped: unwrappedIds } = useMemo(() => {
     const q = query.trim();
     const rows = scoredAll.filter((p) => {
-      if (province !== ALL && p.province !== province) return false;
+      if (province !== ALL_PROVINCES && p.province !== province) return false;
       // Suspect rows are shown by default and badged; this switch is the only
       // thing that hides them, and it is the user's explicit choice.
       if (!tunables.showFlagged && p.warnings.length > 0) return false;
@@ -112,7 +108,7 @@ export function Dashboard({ data }: { data: DashboardData }) {
           !seen.has(p.location_id) &&
           families.has(`${p.province}|${p.county}`) &&
           (tunables.showFlagged || p.warnings.length === 0) &&
-          (province === ALL || p.province === province) &&
+          (province === ALL_PROVINCES || p.province === province) &&
           (!q ||
             p.place.includes(q) ||
             p.county.includes(q) ||
@@ -154,31 +150,20 @@ export function Dashboard({ data }: { data: DashboardData }) {
       .slice(0, 12);
   }, [data.places, selected]);
 
-  /* Held-out rows, for the transparency banner: a flagged place must never be
-     silently dropped, and the user must be able to see the reason. */
-  const heldOut = useMemo(() => {
-    const runtime = new Map(
-      suspectPlaces(data.places).map((s) => [s.location_id, s.reason]),
-    );
-    const out: {
-      place: string;
-      county: string;
-      reason: string;
-      important: boolean;
-    }[] = [];
-    for (const p of data.places) {
-      const reason = exclusionReason(p) ?? runtime.get(p.location_id) ?? null;
-      if (!reason) continue;
-      out.push({
-        place: p.place,
-        county: p.county,
-        reason,
-        important: p.n_pharmacy_total >= 3 || (p.population ?? 0) >= 100_000,
-      });
-    }
-    return out.sort((a, b) => Number(b.important) - Number(a.important));
-  }, [data.places]);
+  /* Held-out rows: one pass, shared by the banner (important subset) and the
+     data-source panel (all rows). A flagged place is never silently dropped. */
+  const heldOut = useMemo(() => heldOutRows(data.places), [data.places]);
+  const importantHeldOut = useMemo(
+    () => heldOut.filter((h) => h.important),
+    [heldOut],
+  );
 
+  const summary = useMemo(() => summarize(visible), [visible]);
+  /** Rows carrying at least one warning, in the current dataset (any province). */
+  const flagCount = useMemo(
+    () => scoredAll.filter((p) => p.warnings.length > 0).length,
+    [scoredAll],
+  );
   const targetAuto = scoredAll[0]?.targetPopPerPharmacy ?? 0;
 
   const applyPreset = (p: Preset) => {
@@ -239,180 +224,23 @@ export function Dashboard({ data }: { data: DashboardData }) {
     );
   }
 
-  const top = visible.slice(0, 5);
-  const totalPopCities = visible.reduce((a, p) => a + (p.population ?? 0), 0);
-  const totalPhCities = visible.reduce((a, p) => a + p.n_pharmacy_total, 0);
-  const totalOtc = visible.reduce((a, p) => a + p.otc.market, 0);
-  const avgProsperity =
-    visible.length > 0
-      ? visible.reduce((a, p) => a + p.prosperity, 0) / visible.length
-      : 0;
-  const avgDensity =
-    totalPopCities > 0 ? (totalPhCities / totalPopCities) * 100_000 : 0;
-  const importantHeldOut = heldOut.filter((h) => h.important);
-  /** Rows carrying at least one warning, in the current dataset (any province). */
-  const flagCount = scoredAll.filter((p) => p.warnings.length > 0).length;
-
   return (
     <main className="mx-auto max-w-[1560px] px-3 py-5 sm:px-5 sm:py-7">
-      {/* ---------------------------------------------------------- header -- */}
-      <header className="mb-4">
-        <div className="rounded-2xl border border-line bg-linear-to-l from-brand/[0.10] via-accent/[0.07] to-transparent px-4 py-4 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_30px_-16px_rgba(15,23,42,0.25)] sm:px-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h1 className="text-[20px] font-extrabold tracking-tight text-ink sm:text-[23px]">
-                انتخاب موقعیت داروخانه — سراسر کشور
-              </h1>
-              <p className="mt-1 max-w-3xl text-[12.5px] leading-5 text-muted">
-                بر پایهٔ دادهٔ ظرفیت داروخانهٔ سازمان غذا و دارو برای تمام ۳۱
-                استان. هر شهر با شش مؤلفه سنجیده می‌شود: اندازهٔ بازار، ظرفیت
-                خالی، تحمل داروخانهٔ جدید (نسبت جمعیت به داروخانه پس از ورود
-                شما)، صف متقاضیان، سد اداری و قدرت خرید — وزن‌ها را خودتان
-                تعیین می‌کنید.
-              </p>
-            </div>
-            <div className="flex flex-col items-end gap-1.5">
-              <div className="flex flex-wrap items-center justify-end gap-1.5">
-                <Badge tone="brand">{group(data.scope.provinces)} استان</Badge>
-                <Badge tone="accent">
-                  {group(data.scope.marketPlaces)} آبادی در دامنهٔ تحلیل
-                </Badge>
-                <Badge tone="muted">
-                  {group(data.scope.totalPlaces)} رکورد خام
-                </Badge>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="tnum text-[10.5px] text-faint">
-                  عکس لحظه‌ای: {jalaliFromIso(data.observedAt)}
-                </span>
-                <Button
-                  variant="outline"
-                  onClick={() => router.refresh()}
-                  title="خواندن دوبارهٔ پایگاه داده (پس از اجرای ETL)"
-                >
-                  ↻ به‌روزرسانی
-                </Button>
-                <Link
-                  href="/settings"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-xs font-medium text-ink-soft transition hover:border-brand hover:text-brand-ink"
-                >
-                  تنظیمات
-                </Link>
-                <Link
-                  href="/map"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent-soft px-2.5 py-1.5 text-xs font-medium text-accent transition hover:bg-accent/15"
-                >
-                  نقشهٔ خوزستان و فاصله‌ها
-                </Link>
-                <Link
-                  href="/places"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-soft px-2.5 py-1.5 text-xs font-medium text-brand-ink transition hover:bg-brand/15"
-                >
-                  همهٔ مکان‌ها و روستاها
-                </Link>
-              </div>
-            </div>
-          </div>
+      <DashboardHeader
+        data={data}
+        top={visible[0]}
+        summary={summary}
+        candidateCount={scoredAll.length}
+        visibleCount={visible.length}
+      />
 
-          <div className="mt-3 grid grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-5">
-            <Stat
-              label="بهترین گزینهٔ فعلی"
-              value={top[0] ? shortPlace(top[0].place) : "—"}
-              sub={
-                top[0]
-                  ? `${top[0].province.replace(/^استان\s+/, "")} · امتیاز ${num(
-                      top[0].scores.opportunity,
-                      1,
-                    )}`
-                  : undefined
-              }
-              tone="good"
-            />
-            <Stat
-              label="در حال مقایسه"
-              value={group(visible.length)}
-              sub={`از ${group(scoredAll.length)} آبادی واجد شرط`}
-              tone="brand"
-            />
-            <Stat
-              label="میانگین اشباع مجموعه"
-              value={num(avgDensity, 1)}
-              sub="داروخانه در ۱۰۰ هزار نفر"
-              tone="accent"
-            />
-            <Stat
-              label="بازار بدون نسخه (سالانه)"
-              value={irr(totalOtc)}
-              sub={`میانگین برخورداری ${num(avgProsperity, 0)} از ۱۰۰`}
-            />
-            <Stat
-              label="جمعیت مقایسه‌شده"
-              value={group(totalPopCities)}
-              sub={`${group(totalPhCities)} داروخانهٔ فعال`}
-            />
-          </div>
-        </div>
-      </header>
-
-      {/* ------------------------------------------------------ data notes -- */}
-      {importantHeldOut.length ? (
-        <details className="no-print mb-3 rounded-xl border border-warn/30 bg-warn-soft/50 px-3.5 py-2.5">
-          <summary className="cursor-pointer text-[12px] font-semibold text-warn">
-            ⚠ {group(importantHeldOut.length)} آبادی به‌دلیل مشکل داده امتیاز
-            نمی‌گیرند — ولی همچنان در فهرست هستند. چرا؟
-          </summary>
-          <div className="mt-2 space-y-1.5 text-[11.5px] leading-5 text-ink-soft">
-            <p>
-              منبع، دادهٔ عملیاتی زنده است نه دادهٔ پالایش‌شده. ردیف‌هایی که از
-              نظر داده ناسالم‌اند همچنان در فهرست می‌مانند و با نشان هشدار
-              مشخص می‌شوند — اما <b>امتیاز نمی‌گیرند</b>، چون در غیر این صورت
-              صدر جدول را با عددی اشتباه اشغال می‌کنند. اگر عدد درست را
-              بدانید، از پنل جزئیات ویرایش کنید تا رتبه‌بندی شود:
-            </p>
-            <ul className="ms-4 list-disc space-y-0.5">
-              <li>
-                <b>جمعیت مشکوک:</b> جمعیت کلان‌شهر روی یک آبادی کوچک نشسته است —
-                مثلاً «شهر تجریش» با جمعیت ۸٬۱۵۴٬۰۵۱ (جمعیت تهران) و فقط ۱
-                داروخانه.
-              </li>
-              <li>
-                <b>جمعیت صفر:</b> شهرهایی که جمعیت‌شان صفر ثبت شده و نسبت
-                داروخانه‌به‌جمعیت برای‌شان بی‌معناست.
-              </li>
-              <li>
-                <b>نام ناقص:</b> ردیف‌هایی با نام «**» یا «-».
-              </li>
-              <li>
-                <b>بدون هیچ سابقهٔ داروخانه:</b> آبادی بزرگی که نه داروخانه دارد
-                و نه متقاضی. این‌ها کنار گذاشته <i>نمی‌شوند</i> — فقط با علامت ⚠
-                نشان‌دار می‌شوند تا خودتان میدانی بررسی کنید. نمونه: «مشکین دشت»
-                با ۵۳٬۴۴۰ نفر و صفر داروخانه در منبع.
-              </li>
-            </ul>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {importantHeldOut.slice(0, 12).map((h, i) => (
-                <Badge key={i} tone="warn" title={h.reason}>
-                  {shortPlace(h.place)} · {h.county.replace(/^شهرستان\s+/, "")}
-                </Badge>
-              ))}
-            </div>
-            <Button
-              variant="outline"
-              className="mt-2"
-              onClick={() =>
-                setTunables({
-                  ...tunables,
-                  showFlagged: !tunables.showFlagged,
-                })
-              }
-            >
-              {tunables.showFlagged
-                ? "پنهان‌کردن این ردیف‌ها از فهرست"
-                : "نمایش دوبارهٔ این ردیف‌ها"}
-            </Button>
-          </div>
-        </details>
-      ) : null}
+      <DataNotes
+        rows={importantHeldOut}
+        showFlagged={tunables.showFlagged}
+        onToggleFlagged={() =>
+          setTunables({ ...tunables, showFlagged: !tunables.showFlagged })
+        }
+      />
 
       {/* ------------------------------------------------------- controls -- */}
       <div className="mb-4">
@@ -441,6 +269,7 @@ export function Dashboard({ data }: { data: DashboardData }) {
               ref={searchRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              aria-label="جستجوی شهر یا شهرستان"
               placeholder="جستجوی شهر یا شهرستان…  (کلید / )"
               className="w-52 rounded-lg border border-line-strong bg-surface px-2.5 py-1.5 text-[12.5px] outline-none placeholder:text-faint focus:border-brand focus:ring-2 focus:ring-brand/20"
             />
@@ -473,154 +302,21 @@ export function Dashboard({ data }: { data: DashboardData }) {
           />
         ) : null}
 
-        {/* Always-visible scoping bar: the two controls that change WHICH places
-            are compared, plus the one-click presets. */}
-        <Card className="no-print mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-2 py-2.5">
-          <span className="text-[11px] font-medium text-muted">استان:</span>
-          <select
-            value={province}
-            onChange={(e) => setProvince(e.target.value)}
-            className="max-w-52 rounded-lg border border-line-strong bg-surface px-2 py-1 text-[11.5px] text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-          >
-            <option value={ALL}>
-              همهٔ {group(data.scope.provinces)} استان (
-              {group(scoredAll.length)})
-            </option>
-            {data.provinces.map((p) => (
-              <option key={p.province} value={p.province}>
-                {p.province.replace(/^استان\s+/, "")} ({group(p.n_places)})
-              </option>
-            ))}
-          </select>
-
-          <span className="mx-1 hidden h-4 w-px bg-line-strong sm:block" />
-
-          {/* Nothing is hidden by default. This is the user's explicit choice to
-              narrow the list, not a silent filter. */}
-          <button
-            type="button"
-            onClick={() =>
-              setTunables({ ...tunables, showFlagged: !tunables.showFlagged })
-            }
-            aria-pressed={tunables.showFlagged}
-            title={
-              tunables.showFlagged
-                ? "همهٔ آبادی‌ها نمایش داده می‌شوند؛ موارد مشکوک با نشان هشدار مشخص‌اند"
-                : "آبادی‌های دارای هشدار پنهان شده‌اند — با کلیک دوباره برگردانید"
-            }
-            className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
-              tunables.showFlagged
-                ? "border-warn/40 bg-warn-soft/60 text-warn"
-                : "border-line bg-surface text-muted hover:border-line-strong"
-            }`}
-          >
-            {tunables.showFlagged ? "◉" : "◌"} نمایش موارد مشکوک
-          </button>
-          {flagCount > 0 ? (
-            <span className="tnum text-[11px] text-faint">
-              ({group(flagCount)} ردیف نشان‌دار)
-            </span>
-          ) : null}
-
-          {/* Unwrap: a city's county family lives only inside its detail panel by
-              default. This pulls the whole family into the table as ordinary rows
-              so every city can be compared at once. */}
-          <button
-            type="button"
-            onClick={() =>
-              setTunables({
-                ...tunables,
-                unwrapSiblings: !tunables.unwrapSiblings,
-              })
-            }
-            aria-pressed={tunables.unwrapSiblings}
-            title={
-              tunables.unwrapSiblings
-                ? "همهٔ شهرهای هم‌شهرستان نمایش داده می‌شوند — با کلیک دوباره ببندید"
-                : "شهرهای هم‌شهرستان (خانوادهٔ هر شهر) را به‌جای پنل، به‌صورت ردیف در همین جدول باز کن تا همه را کنار هم مقایسه کنی"
-            }
-            className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
-              tunables.unwrapSiblings
-                ? "border-brand/40 bg-brand-soft text-brand-ink"
-                : "border-line bg-surface text-muted hover:border-line-strong hover:text-ink"
-            }`}
-          >
-            {tunables.unwrapSiblings ? "⊟" : "⊞"} بازکردن همهٔ شهرهای
-            هم‌شهرستان
-          </button>
-          {tunables.unwrapSiblings ? (
-            <span className="tnum text-[11px] text-faint">
-              ({group(unwrappedIds.size)} شهر هم‌خانواده به جدول افزوده شد)
-            </span>
-          ) : null}
-
-          <span className="mx-1 hidden h-4 w-px bg-line-strong sm:block" />
-
-          <span className="text-[11px] font-medium text-muted">
-            مبنای مقایسه:
-          </span>
-          <div className="flex gap-1">
-            {(
-              [
-                ["national", "کل کشور"],
-                ["province", "داخل هر استان"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setTunables({ ...tunables, basis: id })}
-                className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
-                  tunables.basis === id
-                    ? "border-brand/40 bg-brand-soft text-brand-ink"
-                    : "border-line bg-surface text-muted hover:border-line-strong hover:text-ink"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <span className="mx-1 hidden h-4 w-px bg-line-strong sm:block" />
-
-          <div className="flex flex-wrap gap-1">
-            {PRESETS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                title={p.hint}
-                onClick={() => applyPreset(p)}
-                className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
-                  activePreset === p.id
-                    ? "border-brand/40 bg-brand-soft text-brand-ink"
-                    : "border-line bg-surface text-muted hover:border-line-strong hover:text-ink"
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          <span className="tnum text-[11px] text-faint">
-            · بازار {num(wPct(tunables.weights, "demand"), 0)}٪ · ظرفیت{" "}
-            {num(wPct(tunables.weights, "headroom"), 0)}٪ · تحمل{" "}
-            {num(wPct(tunables.weights, "tolerance"), 0)}٪ · صف{" "}
-            {num(wPct(tunables.weights, "pipeline"), 0)}٪ · سد اداری{" "}
-            {num(wPct(tunables.weights, "barrier"), 0)}٪ · برخورداری{" "}
-            {num(wPct(tunables.weights, "affluence"), 0)}٪ · حداقل جمعیت{" "}
-            {group(tunables.minPopulation)}
-          </span>
-
-          {!showSettings ? (
-            <Button
-              variant="outline"
-              className="ms-auto"
-              onClick={() => setShowSettings(true)}
-            >
-              تنظیم دقیق مدل
-            </Button>
-          ) : null}
-        </Card>
+        <ScopeBar
+          provinces={data.provinces}
+          provinceCount={data.scope.provinces}
+          candidateCount={scoredAll.length}
+          province={province}
+          onProvince={setProvince}
+          tunables={tunables}
+          onTunables={setTunables}
+          activePreset={activePreset}
+          onPreset={applyPreset}
+          flagCount={flagCount}
+          unwrappedCount={unwrappedIds.size}
+          showSettings={showSettings}
+          onOpenSettings={() => setShowSettings(true)}
+        />
       </div>
 
       {/* Population basis: the FDA figure vs the corroborated census figure.
@@ -640,7 +336,7 @@ export function Dashboard({ data }: { data: DashboardData }) {
               rows={visible}
               economics={economics}
               selectedId={selectedId}
-              showProvince={province === ALL}
+              showProvince={province === ALL_PROVINCES}
               onSelect={setSelectedId}
               unwrappedIds={unwrappedIds}
             />

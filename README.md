@@ -522,10 +522,12 @@ web/
   src/lib/db.ts       node:sqlite access
   src/lib/data.ts     server-side payload assembly (is_market scope)
   src/lib/analytics.ts scoring model, percentile ranking, exclusion rules
+  src/lib/dashboardStats.ts  held-out rows + header aggregates (one pass each)
   src/lib/otc.ts      buying-power index + the out-of-pocket (بدون نسخه) model
   src/lib/format.ts   Persian digits/separators — the single place that decides them
   src/lib/jalali.ts   Gregorian → Shamsi date
   src/components/     Dashboard, Controls, PlacesTable, Charts, DetailPanel, …
+  src/components/dashboard/  Header, ScopeBar, DataNotes (parts of Dashboard)
   scripts/proof.mjs   headless Chrome proof harness (screenshots + DOM measurements)
   scripts/dom-audit.mjs  exact rendered strings + overflow/clipping audit
 db/pharmacy.sqlite    the database
