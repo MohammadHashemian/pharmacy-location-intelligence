@@ -371,6 +371,32 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Where to open (`etl/rank_sites.py`)
+
+The map is descriptive until this runs. It scores every candidate over a 1.2 km catchment
+and writes `site_candidate`, which the map draws as numbered badges (layer «پیشنهادهای
+مکانی») with the components on click.
+
+    gap       residents per *accounted* pharmacy  (mapped + FDA residual × 0.85)
+    anchors   doctors + 1.4·clinics + 2·hospitals + 0.5·labs within 1.2 km
+    density   demand per km²
+    access    1 / (1 + road_km to اهواز / 60)
+    score     0.45·gap + 0.25·anchors + 0.15·density + 0.15·access
+
+Three rules keep the list honest:
+
+* **FDA residual** — 372 licences the feed has but nobody geocoded are placed around their
+  settlement and counted at 0.85, because a town with 9 licensed and 2 mapped pharmacies is
+  a *mapping* gap, not an opportunity;
+* **no duplicates** — kept candidates are ≥ 3 km apart; the first run listed three points
+  800 m apart and called it a top three;
+* **county cap** — six per county, or the answer is «wherever the people already are».
+
+Two data bugs this exposed and fixed: `pop_province.json` held one 0.5 km cell with
+**343,270 people** (a city whose disc was mostly owned by the finer surface dumped its whole
+census into the few cells left; a 5.5 km bucket rounding did the same to villages), and
+veterinary pharmacies were counted as competition.
+
 ### Roads between towns (`etl/build_connectors.py`)
 
 `fetch_province_streets.py` keeps only what lies inside each city's disc, so a town's own

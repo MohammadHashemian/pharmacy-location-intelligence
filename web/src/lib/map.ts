@@ -175,8 +175,27 @@ export type MapTotals = {
   mappedPharm: number;
 };
 
+export type SiteCandidate = {
+  rank: number;
+  score: number;
+  lat: number;
+  lon: number;
+  settlement: string | null;
+  county: string | null;
+  demand: number;
+  demandKm2: number;
+  supplyMapped: number;
+  supplyExpected: number;
+  anchors: number;
+  roadKm: number;
+  gap: number;
+  reason: string;
+};
+
 export type MapData = {
   settlements: MapSettlement[];
+  /** Ranked places to open a pharmacy (`etl/rank_sites.py`). Empty until it has run. */
+  sites: SiteCandidate[];
   /** [index a, index b] into `settlements`. */
   edges: [number, number][];
   cells: MapCell[];
@@ -369,6 +388,29 @@ export function loadMapData(): MapData {
   }));
 
   ensureManualTable();
+  /* Ranked candidates. The table is written by the ETL, so a fresh clone without it
+     still renders: an empty list means «no recommendation», not a broken map. */
+  let sites: SiteCandidate[] = [];
+  try {
+    sites = all<{
+      rank: number; score: number; lat: number; lon: number; settlement: string | null;
+      county: string | null; demand: number; demand_km2: number; supply_mapped: number;
+      supply_expected: number; anchors: number; road_km: number; gap: number; reason: string;
+    }>(
+      `SELECT rank, score, lat, lon, settlement, county, demand, demand_km2,
+              supply_mapped, supply_expected, anchors, road_km, gap, reason
+         FROM site_candidate ORDER BY rank`,
+    ).map((r) => ({
+      rank: r.rank, score: r.score, lat: r.lat, lon: r.lon,
+      settlement: r.settlement, county: r.county, demand: r.demand,
+      demandKm2: r.demand_km2, supplyMapped: r.supply_mapped,
+      supplyExpected: r.supply_expected, anchors: r.anchors, roadKm: r.road_km,
+      gap: r.gap, reason: r.reason,
+    }));
+  } catch {
+    sites = [];
+  }
+
   const pharmacies: MapPharmacy[] = all<{
     osm_type: string;
     osm_id: number;
@@ -556,6 +598,7 @@ export function loadMapData(): MapData {
 
   return {
     settlements,
+    sites,
     edges,
     cells,
     pharmacies,

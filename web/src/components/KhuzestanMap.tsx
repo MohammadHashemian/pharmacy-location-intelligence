@@ -387,6 +387,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     med: true,
     streets: true,
     sat: false,
+    sites: true,
   });
   const [targetPerPharm, setTargetPerPharm] = useState(
     Math.round((data.meta.residentsPerPharmacy || 5400) / 100) * 100,
@@ -618,6 +619,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const [addPhone, setAddPhone] = useState("");
   const [addBusy, setAddBusy] = useState(false);
   const [addMsg, setAddMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [selSite, setSelSite] = useState<number | null>(null);
   const [probeMode, setProbeMode] = useState(false);
 
   /* Roads come from a static asset (1.5 MB), not the RSC payload: they never
@@ -955,15 +957,28 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     const medPx = medRadiusPx(view.k);
     const tolM = Math.max(9, medPx + 5) / ratio;
 
-    let best = { s: -1, p: -1, m: -1 };
+    let best = { s: -1, p: -1, m: -1, si: -1 };
     let score = 2;
+
+    if (layers.sites && data.sites.length) {
+      const tol = 9 / ratio;
+      for (let i = 0; i < data.sites.length; i++) {
+        const q = data.sites[i];
+        const [qx, qy] = scene.proj(q.lat, q.lon);
+        const d = (Math.hypot(qx - sx, qy - sy) / tol) * 0.6;
+        if (d < 1 && d < score) {
+          score = d;
+          best = { s: -1, p: -1, m: -1, si: i };
+        }
+      }
+    }
 
     for (let i = 0; i < scene.pts.length; i++) {
       const q = scene.pts[i];
       const d = Math.hypot(q.x - sx, q.y - sy) / tolS;
       if (d < 1 && d < score) {
         score = d;
-        best = { s: i, p: -1, m: -1 };
+        best = { s: i, p: -1, m: -1, si: -1 };
       }
     }
     if (layers.osm) {
@@ -972,7 +987,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         const d = (Math.hypot(q.x - sx, q.y - sy) / tolP) * 0.75;
         if (d < 1 && d < score) {
           score = d;
-          best = { s: -1, p: i, m: -1 };
+          best = { s: -1, p: i, m: -1, si: -1 };
         }
       }
     }
@@ -982,7 +997,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         const d = (Math.hypot(q.x - sx, q.y - sy) / tolM) * 0.75;
         if (d < 1 && d < score) {
           score = d;
-          best = { s: -1, p: -1, m: i };
+          best = { s: -1, p: -1, m: i, si: -1 };
         }
       }
     }
@@ -1181,6 +1196,40 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
   /* Urban streets, projected once and grouped by class. Only the city the view
      is centred on is loaded, and only above ~5x. */
+  /* Ranked places to open a pharmacy. Drawn as numbered badges because the order is
+     the point: a star without a rank says nothing. */
+  const siteLayer = useMemo(() => {
+    if (!layers.sites || !data.sites.length) return null;
+    return (
+      <g pointerEvents="none">
+        {data.sites.map((site) => {
+          const [x, y] = scene.proj(site.lat, site.lon);
+          const hot = site.score >= 0.8;
+          const fill = hot ? "#16a34a" : site.score >= 0.6 ? "#0d9488" : "#f59e0b";
+          return (
+            <g key={site.rank}>
+              <circle cx={x} cy={y} r={9 / view.k} fill={fill} opacity={0.22} />
+              <circle cx={x} cy={y} r={5.4 / view.k} fill={fill} stroke="#fff" strokeWidth={1.4 / view.k} />
+              <text
+                x={x}
+                y={y + 1.9 / view.k}
+                textAnchor="middle"
+                fontSize={6.4 / view.k}
+                fontWeight={700}
+                fill="#fff"
+                paintOrder="stroke"
+                stroke={fill}
+                strokeWidth={0.6 / view.k}
+              >
+                {site.rank}
+              </text>
+            </g>
+          );
+        })}
+      </g>
+    );
+  }, [layers.sites, data.sites, scene, view.k]);
+
   const connectorPts = useMemo(() => {
     if (!connectors?.length) return null;
     return connectors.map((seg) => {
@@ -1969,6 +2018,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     ["med", "خدمات درمانی"],
                     ["osm", "داروخانه‌های نقشه"],
                     ["sat", "تصویر ماهواره‌ای"],
+                    ["sites", "پیشنهادهای مکانی"],
                   ] as const
                 ).map(([id, label]) => (
                   <label
@@ -2058,6 +2108,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 return;
               }
               const hit = hitTest(e.clientX, e.clientY);
+              if (hit.si >= 0) {
+                setSelSite(data.sites[hit.si].rank);
+                setSelPharm(null);
+                setSelMed(null);
+                return;
+              }
               if (hit.s >= 0) {
                 select(settlements[hit.s], false);
               } else if (hit.p >= 0) {
@@ -2190,6 +2246,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <g data-layer="settlements">{dotLayer}</g>
               <g data-layer="medical">{medicalLayer}</g>
               <g data-layer="pharmacy">{pharmacyLayer}</g>
+              <g data-layer="sites">{siteLayer}</g>
 
               {addPin ? (
                 <g pointerEvents="none">
@@ -2282,6 +2339,86 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               تصویر: Esri · Maxar · Earthstar Geographics
             </div>
           ) : null}
+
+          {layers.sites && data.sites.length ? (
+            <details className="absolute bottom-2 left-2 z-20 w-[246px] max-w-[80vw] rounded-xl border border-line bg-surface/97 text-[10.5px] shadow-lg">
+              <summary className="cursor-pointer list-none px-2 py-1.5 font-medium text-ink">
+                پیشنهادهای مکانی · {data.sites.length.toLocaleString("fa-IR")} مورد
+              </summary>
+              <ol className="max-h-52 overflow-auto border-t border-line px-1 py-1">
+                {data.sites.slice(0, 12).map((site) => (
+                  <li key={site.rank}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelSite(site.rank);
+                        const [sx, sy] = scene.proj(site.lat, site.lon);
+                        commit(12, W / 2 - sx * 12, H / 2 - sy * 12);
+                      }}
+                      className="flex w-full items-baseline justify-between gap-1 rounded px-1 py-0.5 text-right hover:bg-surface-2"
+                    >
+                      <span className="tnum w-4 text-faint">{site.rank}</span>
+                      <span className="flex-1 truncate text-ink-soft">{site.settlement ?? "—"}</span>
+                      <span className="tnum text-[9.5px] text-muted">
+                        {Math.round(site.demand / 1000)}k
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          ) : null}
+
+          {selSite !== null ? (() => {
+            const site = data.sites.find((x) => x.rank === selSite);
+            if (!site) return null;
+            return (
+              <div className="absolute bottom-2 right-2 z-30 w-[290px] max-w-[88vw] rounded-xl border border-[#16a34a]/40 bg-surface p-2.5 text-[11px] shadow-xl">
+                <div className="flex items-start justify-between gap-2">
+                  <b className="text-[12px] text-ink">
+                    پیشنهاد #{site.rank} · {site.settlement ?? "—"}
+                  </b>
+                  <button
+                    type="button"
+                    onClick={() => setSelSite(null)}
+                    className="rounded border border-line-strong px-1 text-[10px] text-muted"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="mt-0.5 text-[10.5px] text-muted">
+                  {site.county ?? ""} · امتیاز {site.score.toFixed(2)}
+                </div>
+                <ul className="mt-1 space-y-0.5 text-[10.5px] text-ink-soft">
+                  <li>جمعیت در ۱٫۲ کم: <b className="tnum">{Math.round(site.demand).toLocaleString("fa-IR")}</b></li>
+                  <li>داروخانهٔ ثبت‌شده: <b className="tnum">{site.supplyMapped.toFixed(0)}</b> · مجوز ثبت‌نشده: <b className="tnum">{site.supplyExpected.toFixed(0)}</b></li>
+                  <li>امتیاز درمانی (پزشک/کلینیک/بیمارستان): <b className="tnum">{site.anchors.toFixed(1)}</b></li>
+                  <li>نفر به ازای هر داروخانه: <b className="tnum">{Math.round(site.gap).toLocaleString("fa-IR")}</b></li>
+                  <li>فاصلهٔ جاده‌ای از اهواز: <b className="tnum">{Math.round(site.roadKm).toLocaleString("fa-IR")}</b> کم</li>
+                </ul>
+                <div className="mt-1.5 flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const [sx, sy] = scene.proj(site.lat, site.lon);
+                      commit(14, W / 2 - sx * 14, H / 2 - sy * 14);
+                    }}
+                    className="rounded-lg border border-[#16a34a] bg-[#16a34a] px-2 py-1 text-[10.5px] font-medium text-white"
+                  >
+                    بزرگ‌نمایی ۱۴×
+                  </button>
+                  <a
+                    href={`https://www.google.com/maps?q=${site.lat},${site.lon}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-lg border border-line-strong bg-surface px-2 py-1 text-[10.5px] text-ink-soft"
+                  >
+                    گوگل‌مپ ↗
+                  </a>
+                </div>
+              </div>
+            );
+          })() : null}
 
           {addMode && addPin ? (
             <div className="absolute bottom-2 right-2 z-30 w-[268px] max-w-[86vw] rounded-xl border border-good/40 bg-surface p-2.5 text-[11px] shadow-xl">

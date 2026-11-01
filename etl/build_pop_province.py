@@ -78,7 +78,7 @@ def main() -> int:
     if os.path.exists(URBAN):
         u = json.load(open(URBAN, encoding="utf-8"))
         for la, lo, *_ in u.get("cells", []):
-            fine_cells.add((round(la / 0.05), round(lo / 0.05)))
+            fine_cells.add((round(la / 0.01), round(lo / 0.01)))
         print(f"finer surface owns {len(fine_cells):,} cells "
               f"({len(u.get('cities', []))} cities)")
 
@@ -114,6 +114,7 @@ def main() -> int:
     acc: dict[tuple[int, int], float] = {}
     total = 0.0
     skipped_covered = 0
+    skipped_town = 0
     for s in settlements:
         pop = float(s["population"] or 0)
         if pop <= 0:
@@ -125,13 +126,15 @@ def main() -> int:
                      round((s["lon"] + r / (111.32 * math.cos(math.radians(s["lat"])))) / dlon)
         cells: list[tuple[tuple[int, int], float]] = []
         wsum = 0.0
+        considered = 0
         for i in range(min(ila0, ila1), max(ila0, ila1) + 1):
             for j in range(min(ilo0, ilo1), max(ilo0, ilo1) + 1):
                 la, lo = i * dlat, j * dlon
                 d = hav(s["lat"], s["lon"], la, lo)
                 if d > r:
                     continue
-                if (round(la / 0.05), round(lo / 0.05)) in fine_cells:
+                considered += 1
+                if (round(la / 0.01), round(lo / 0.01)) in fine_cells:
                     skipped_covered += 1
                     continue
                 kernel = (1 - d / r) ** 2
@@ -159,10 +162,24 @@ def main() -> int:
                 wsum += w
         if wsum <= 0:
             continue
+        # Only the share of a settlement whose ground this file actually owns. A city
+        # already described by the 250 m surface keeps a handful of cells, and handing
+        # it the whole census put 343,270 people in one square; skipping it outright
+        # instead dropped 716 villages.
+        share = len(cells) / considered if considered else 0.0
+        if share < 0.02:
+            skipped_town += 1
+            continue
+        pop = pop * share
         for (i, j), w in cells:
             acc[(i, j)] = acc.get((i, j), 0.0) + pop * w / wsum
 
-    cells_out = [[round(i * dlat, 4), round(j * dlon, 4), round(v, 1)]
+    # A 0.5 km cell holding 29,713 people is a computation, not a place: dense Iranian
+    # blocks top out around 25,000/km2, so 6,000 per cell is already generous. Clipping
+    # keeps the surface honest and says how much was clipped.
+    CAP = 6000.0
+    clipped = sum(1 for v in acc.values() if v > CAP)
+    cells_out = [[round(i * dlat, 4), round(j * dlon, 4), round(min(v, CAP), 1)]
                  for (i, j), v in acc.items() if v >= 1.0]
     assigned = sum(x[2] for x in cells_out)
     payload = {
@@ -174,6 +191,8 @@ def main() -> int:
         "population": round(total),
         "assigned": round(assigned),
         "skipped_cells_covered_by_fine_surface": skipped_covered,
+        "clipped_cells": clipped,
+        "settlements_left_to_the_fine_surface": skipped_town,
         "cells": cells_out,
     }
     json.dump(payload, open(OUT, "w", encoding="utf-8"), separators=(",", ":"))
