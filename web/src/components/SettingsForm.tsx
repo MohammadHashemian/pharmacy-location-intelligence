@@ -118,8 +118,9 @@ export function SettingsForm({ initial }: { initial: SettingStatus[] }) {
                 {p.masked}
                 {p.updatedAt ? (
                   <span className="text-faint">
-                    {" "}
-                    · {p.updatedAt.slice(0, 16).replace("T", " ")}
+                    {" · "}
+                    {/* a bare ISO date inside an RTL line reorders itself */}
+                    <bdi dir="ltr">{p.updatedAt.slice(0, 16).replace("T", " ")}</bdi>
                   </span>
                 ) : null}
               </div>
