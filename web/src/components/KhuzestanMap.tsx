@@ -38,6 +38,13 @@ const PAD = 14;
 const MAX_ZOOM = 40;
 const RING_EDGES = [25, 50, 75, 100, 150, 200, 300];
 
+/* Marker sizes are radii in CSS px. They grow a little with zoom so a diamond is
+   findable at 1x, then stop: at 8x a 14 px diamond covered the street detail and
+   clusters of them merged into one blob. 9-10 px diameter is the size a map marker
+   wants. */
+const pharmRadiusPx = (k: number) => 2.4 + Math.min(1.4, Math.log2(Math.max(1, k)) * 0.5);
+const medRadiusPx = (k: number) => 2.2 + Math.min(1.2, Math.log2(Math.max(1, k)) * 0.44);
+
 const COLORS = {
   city: "#4338ca",
   village: "#334155",
@@ -173,7 +180,7 @@ function buildScene(data: MapData): Scene {
     /* Screen-constant radius: 1.3 px for a hamlet, 4.6 px for a 300k city.
        It used to reach 9 px, which merged neighbours into one blob and hid the
        density cells underneath. */
-    return { x, y, r: 1.3 + Math.min(3.3, Math.sqrt(Math.max(0, pop)) / 150) };
+    return { x, y, r: 1.2 + Math.min(2.5, Math.sqrt(Math.max(0, pop)) / 190) };
   });
 
   const edges: [number, number, number, number][] = data.edges.map(([a, b]) => [
@@ -885,9 +892,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
        specific markers: clicking a pharmacy that sits inside a town used to open
        the town instead, because the settlement test ran first and won at 9 px. */
     const tolS = 9 / ratio;
-    const pharmPx = 2.8 + Math.min(4.2, Math.log2(Math.max(1, view.k)) * 1.5);
+    const pharmPx = pharmRadiusPx(view.k);
     const tolP = Math.max(9, pharmPx + 5) / ratio;
-    const medPx = 2.6 + Math.min(3.6, Math.log2(Math.max(1, view.k)) * 1.4);
+    const medPx = medRadiusPx(view.k);
     const tolM = Math.max(9, medPx + 5) / ratio;
 
     let best = { s: -1, p: -1, m: -1 };
@@ -995,24 +1002,73 @@ export function KhuzestanMap({ data }: { data: MapData }) {
      are a SAMPLE (223 of the ~884 the FDA counts), so the legend says «نقشه‌شده». */
   const pharmacyLayer = useMemo(() => {
     /* Mapped pharmacies are the layer the site decision is made on, so they are
-       drawn from the province view too. The marker is 2.8 px at zoom 1 and grows
-       to ~7 px by 8x: at a fixed 2.7 px the diamond stayed invisible exactly
-       when the reader zoomed in to see it. */
+       drawn from the province view too — but two shops on the same street corner
+       must not become one orange blob: markers are deduped in SCREEN space on a
+       7 px lattice, and a merged marker carries «+n», so 105 diamonds in a district
+       stay countable instead of stacking. */
     if (!layers.osm) return null;
-    const px = 2.8 + Math.min(4.2, Math.log2(Math.max(1, view.k)) * 1.5);
+    const px = pharmRadiusPx(view.k);
     const r = px / view.k;
+    /* Greedy screen-space declutter: a marker is drawn only if no accepted marker
+       is within one marker-width of it, otherwise it is folded into that marker's
+       «+n». A lattice alone still let diagonal neighbours overlap. */
+    const gapPx = px * 1.9;
+    const gap = gapPx / view.k;
+    const buckets = new Map<string, { x: number; y: number; n: number }>();
+    const grid = new Map<string, { x: number; y: number; n: number }[]>();
+    const gkey = (x: number, y: number) => `${Math.floor(x * view.k / gapPx)}:${Math.floor(y * view.k / gapPx)}`;
+    for (const p of scene.pharm) {
+      let host: { x: number; y: number; n: number } | null = null;
+      const gx = Math.floor((p.x * view.k) / gapPx);
+      const gy = Math.floor((p.y * view.k) / gapPx);
+      for (let ox = -1; ox <= 1 && !host; ox++) {
+        for (let oy = -1; oy <= 1 && !host; oy++) {
+          for (const q of grid.get(`${gx + ox}:${gy + oy}`) ?? []) {
+            if (Math.hypot(q.x - p.x, q.y - p.y) < gap) {
+              host = q;
+              break;
+            }
+          }
+        }
+      }
+      if (host) {
+        host.n += 1;
+        continue;
+      }
+      const item = { x: p.x, y: p.y, n: 1 };
+      buckets.set(`${gx}:${gy}:${p.x.toFixed(3)}`, item);
+      const list = grid.get(gkey(p.x, p.y));
+      if (list) list.push(item);
+      else grid.set(gkey(p.x, p.y), [item]);
+    }
     return (
       <g>
-        {scene.pharm.map((p, i) => (
-          <path
-            key={i}
-            d={`M${p.x} ${p.y - r} L${p.x + r} ${p.y} L${p.x} ${p.y + r} L${p.x - r} ${p.y}Z`}
-            fill={COLORS.pharmacy}
-            fillOpacity={0.95}
-            stroke="#ffffff"
-            strokeWidth={1}
-            vectorEffect="non-scaling-stroke"
-          />
+        {[...buckets.values()].map((b, i) => (
+          <g key={i}>
+            <path
+              d={`M${b.x} ${b.y - r} L${b.x + r} ${b.y} L${b.x} ${b.y + r} L${b.x - r} ${b.y}Z`}
+              fill={COLORS.pharmacy}
+              fillOpacity={0.95}
+              stroke="#ffffff"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+            {b.n >= 3 && view.k >= 5 ? (
+              <text
+                x={b.x + r * 1.1}
+                y={b.y - r * 0.9}
+                fontSize={7.5 / view.k}
+                fontWeight={700}
+                fill="#7c2d12"
+                paintOrder="stroke"
+                stroke="#ffffff"
+                strokeWidth={2.4 / view.k}
+                strokeOpacity={0.9}
+              >
+                {`+${b.n - 1}`}
+              </text>
+            ) : null}
+          </g>
         ))}
       </g>
     );
@@ -1022,12 +1078,22 @@ export function KhuzestanMap({ data }: { data: MapData }) {
      reads as a pharmacy, and a plus sign for the ones that write prescriptions. */
   const medicalLayer = useMemo(() => {
     if (!layers.med || view.k < 1.6) return null;
-    const px = 2.6 + Math.min(3.6, Math.log2(Math.max(1, view.k)) * 1.4);
+    const px = medRadiusPx(view.k);
     const r = px / view.k;
+    const cell = 6 / view.k;
+    const seen = new Set<string>();
+    const shown: { i: number; x: number; y: number }[] = [];
+    scene.med.forEach((p, i) => {
+      const key = `${Math.round(p.x / cell)}:${Math.round(p.y / cell)}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      shown.push({ i, x: p.x, y: p.y });
+    });
     return (
       <g>
-        {data.medical.map((m, i) => {
-          const p = scene.med[i];
+        {shown.map(({ i, x, y }) => {
+          const m = data.medical[i];
+          const p = { x, y };
           const plus = m.kind === "clinic" || m.kind === "hospital" || m.kind === "lab";
           return plus ? (
             <path
@@ -1847,7 +1913,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                       fillOpacity={
                         mode === "dens" && c.v <= 0
                           ? 0.45
-                          : (view.k >= 4.5 ? 0.22 : 0.35) +
+                          : (view.k >= 4.5 ? 0.17 : 0.35) +
                             0.45 * Math.min(1, c.v / fineCells.cap)
                       }
                     />
