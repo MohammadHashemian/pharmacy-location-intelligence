@@ -1011,26 +1011,34 @@ export function KhuzestanMap({ data }: { data: MapData }) {
      کیانپارس looked like the desert. Each mapped pharmacy now carries
      total / n_mapped (total preserved), and a settlement with nothing mapped
      keeps its count on the centroid — same rule as etl/build_map_layer.py. */
-  const weightedSupply = useMemo(() => {
-    const byArea = new Map<number, { lat: number; lon: number }[]>();
+  /* Two halves of the same number, kept apart on purpose:
+       located  — a pharmacy with a coordinate (OSM / Neshan / Google), weight 1
+       residual — the FDA count for the settlement MINUS the ones located there:
+                  they exist, we just do not know where, so they are spread over
+                  the town's built-up disc as a density (per km²) instead of being
+                  stacked on a centroid or smeared over the located ones.
+     located + residual == the FDA count, so the province total is untouched. */
+  const supply = useMemo(() => {
+    const located: { lat: number; lon: number }[] = [];
+    const locatedByArea = new Map<number, number>();
     for (const p of data.pharmacies) {
-      if (p.areaId == null) continue;
-      const list = byArea.get(p.areaId);
-      if (list) list.push({ lat: p.lat, lon: p.lon });
-      else byArea.set(p.areaId, [{ lat: p.lat, lon: p.lon }]);
+      located.push({ lat: p.lat, lon: p.lon });
+      if (p.areaId != null) locatedByArea.set(p.areaId, (locatedByArea.get(p.areaId) ?? 0) + 1);
     }
-    const out: { lat: number; lon: number; w: number }[] = [];
+    const residual: { lat: number; lon: number; perKm2: number; km: number; n: number }[] = [];
+    let expected = 0;
+    let placed = 0;
     for (const st of settlements) {
+      expected += st.ph;
       if (!st.ph) continue;
-      const here = byArea.get(st.id) ?? [];
-      if (here.length) {
-        const w = st.ph / here.length;
-        for (const q of here) out.push({ lat: q.lat, lon: q.lon, w });
-      } else {
-        out.push({ lat: st.lat, lon: st.lon, w: st.ph });
-      }
+      const n = Math.min(st.ph, locatedByArea.get(st.id) ?? 0);
+      placed += n;
+      const left = st.ph - n;
+      if (left <= 0) continue;
+      const km = Math.max(2.5, Math.min(12, 0.9 * Math.sqrt(Math.max(0, st.pop ?? 0) / 1000)));
+      residual.push({ lat: st.lat, lon: st.lon, perKm2: left / (Math.PI * km * km), n: left, km });
     }
-    return out;
+    return { located, residual, expected, placed };
   }, [data.pharmacies, settlements]);
 
   const fineCells = useMemo(() => {
@@ -1075,11 +1083,18 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     });
 
     const wb: Map<number, number[]> = new Map();
-    weightedSupply.forEach((p, i) => {
+    supply.located.forEach((p, i) => {
       const kk = key(p.lat, p.lon);
       const list = wb.get(kk);
       if (list) list.push(i);
       else wb.set(kk, [i]);
+    });
+    const residualBuckets: Map<number, number[]> = new Map();
+    supply.residual.forEach((r, i) => {
+      const kk = key(r.lat, r.lon);
+      const list = residualBuckets.get(kk);
+      if (list) list.push(i);
+      else residualBuckets.set(kk, [i]);
     });
 
     const R = 6371.0088;
@@ -1122,11 +1137,17 @@ export function KhuzestanMap({ data }: { data: MapData }) {
            - «شکاف ظرفیت» stays per-capita, which is the right unit for a region.
         */
         const R = mode === "dens" ? 1.5 : 3;
+        let surface = 0;                     // pharmacies/km² we cannot place
         for (let oa = -1; oa <= 1; oa++) {
           for (let ol = -1; ol <= 1; ol++) {
-            for (const i of wb.get(key(la + oa * 0.03, lo + ol * 0.03)) ?? []) {
-              const q = weightedSupply[i];
-              if (dist(la, lo, q.lat, q.lon) <= R) ph += q.w;
+            const kk = key(la + oa * 0.03, lo + ol * 0.03);
+            for (const i of wb.get(kk) ?? []) {
+              const q = supply.located[i];
+              if (dist(la, lo, q.lat, q.lon) <= R) ph += 1;
+            }
+            for (const i of residualBuckets.get(kk) ?? []) {
+              const r = supply.residual[i];
+              if (dist(la, lo, r.lat, r.lon) <= r.km) surface += r.perKm2;
             }
           }
         }
@@ -1135,8 +1156,8 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         const areaKm2 = Math.PI * R * R;
         const v =
           mode === "dens"
-            ? ph / areaKm2
-            : Math.max(0, pop / targetPerPharm - ph);
+            ? ph / areaKm2 + surface        // located per km² + the un-located remainder
+            : Math.max(0, pop / targetPerPharm - ph - surface * areaKm2);
         if (v > maxV) maxV = v;
         const [cx, cy] = scene.proj(la, lo);
         out.push({ x: cx, y: cy, v, pop, ph, n });
@@ -1150,7 +1171,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       ? Math.max(1e-6, sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))])
       : 1;
     return { cells: out, max: maxV, cap, stepKm, dLat, dLon };
-  }, [settled, scene, settlements, mode, targetPerPharm]);
+  }, [settled, scene, settlements, mode, targetPerPharm, supply]);
 
   /* Roads: culled to the viewport and to the class the zoom level needs, then
      concatenated into two paths — 8k <path> nodes would choke the renderer. */
@@ -1886,8 +1907,20 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px]">
                 <span className="text-faint">جمعیت</span>
                 <span className="tnum text-left font-medium">{fmtPop(hoverS.pop)}</span>
-                <span className="text-faint">داروخانه</span>
+                <span className="text-faint">داروخانه (FDA)</span>
                 <span className="tnum text-left font-medium">{group(hoverS.ph)}</span>
+                <span className="text-faint">نقشه‌شده</span>
+                <span className="tnum text-left font-medium text-brand-ink">
+                  {group(hoverS.mapped)}
+                </span>
+                {hoverS.ph > hoverS.mapped ? (
+                  <>
+                    <span className="text-faint">بدون موقعیت</span>
+                    <span className="tnum text-left font-medium text-warn">
+                      {group(hoverS.ph - hoverS.mapped)}
+                    </span>
+                  </>
+                ) : null}
                 <span className="text-faint">از اهواز</span>
                 <span className="tnum text-left font-medium">{fmtKm(hoverS.dist)}</span>
               </div>
@@ -2161,6 +2194,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 ["شبکه/جادهٔ اندازه‌گیری‌شده", `${selectedS.net !== null ? fmtKm(selectedS.net) : "—"} / ${selectedS.road !== null ? fmtKm(selectedS.road) : "—"}`],
                 ["گام‌های شبکه", selectedS.deg === null ? "—" : group(selectedS.deg)],
                 ["داروخانهٔ نقشه‌شده (≤۳ کم)", group(selectedS.mapped)],
+                [
+                  "بدون موقعیت (FDA منهای نقشه‌شده)",
+                  group(Math.max(0, selectedS.ph - selectedS.mapped)),
+                ],
                 ["در فید سازمان", selectedS.inFda ? "بله" : "خیر"],
               ].map(([k, v]) => (
                 <div key={k} className="contents">

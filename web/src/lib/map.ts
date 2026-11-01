@@ -171,6 +171,8 @@ export type MapTotals = {
   noPharmacy: number;
   /** Clinics, doctors, dentists, hospitals, labs — the demand side. */
   medical: number;
+  /** Pharmacies with a coordinate (the rest of the FDA count has none). */
+  mappedPharm: number;
 };
 
 export type MapData = {
@@ -521,6 +523,7 @@ export function loadMapData(): MapData {
     withPharmacy: agg?.with_ph ?? 0,
     noPharmacy: (agg?.n ?? 0) - (agg?.with_ph ?? 0),
     medical: medical.length,
+    mappedPharm: pharmacies.length,
   };
 
   return {

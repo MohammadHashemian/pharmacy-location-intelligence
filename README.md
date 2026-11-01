@@ -313,6 +313,21 @@ Two consequences worth knowing:
 * colour is capped at the 95th percentile, otherwise one dense block washes every
   other district to the palest step.
 
+### Expected vs located pharmacies
+
+The FDA count is *expected* supply; the map has *located* supply. Both are now used,
+and never double-counted:
+
+* `located` — a pharmacy with a coordinate (OSM/Neshan/Google), weight 1 at its point;
+* `residual` — `FDA count − located in that settlement`: they exist, we do not know
+  where, so they enter the fine grid as a **density per km² spread over the town's
+  built-up disc** (`0.9·√(pop/1000)` km, 2.5–12 km) instead of stacking on a centroid;
+* `located + residual = FDA count`, so the provincial total (894) is preserved and a
+  district with no survey still shows the background its town implies.
+
+Every settlement tooltip/card shows the split — جمعیت, داروخانه (FDA), نقشهشده,
+بدون موقعیت — and the header chip reads «۸۹۴ داروخانه در فید سازمان · ۴۱۹ روی نقشه».
+
 ### Pharmacy profiles and the demand side
 
 Two more tables sit beside the map layer:
