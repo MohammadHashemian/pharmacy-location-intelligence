@@ -79,6 +79,31 @@ export type MapShape = {
   rings: number[][][];
 };
 
+/** Public Google Places profile of a mapped pharmacy (competitor analysis). */
+function safeJson<T>(v: string | null): T | null {
+  if (!v) return null;
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return null;
+  }
+}
+
+export type MapPharmacyProfile = {
+  address: string | null;
+  phone: string | null;
+  website: string | null;
+  rating: number | null;
+  reviews: number | null;
+  priceLevel: string | null;
+  hours: string[];
+  /** Photo resource names — the browser asks /api/place-photo for the bytes. */
+  photos: string[];
+  summary: string | null;
+  mapsUri: string | null;
+  status: string | null;
+};
+
 /** One pharmacy somebody mapped on the ground (OSM `amenity=pharmacy`). */
 export type MapPharmacy = {
   id: string;
@@ -90,6 +115,21 @@ export type MapPharmacy = {
   lon: number;
   /** Distance to the nearest administrative settlement, km. */
   km: number;
+  settlement: string | null;
+  county: string | null;
+  /** null until `etl/enrich_pharmacy_profiles.py` has run for this place. */
+  profile: MapPharmacyProfile | null;
+};
+
+/** A place prescriptions are written: doctor, clinic, dentist, hospital, lab. */
+export type MapMedical = {
+  id: number;
+  kind: "doctor" | "clinic" | "dentist" | "hospital" | "lab";
+  name: string;
+  lat: number;
+  lon: number;
+  km: number;
+  address: string | null;
   settlement: string | null;
   county: string | null;
 };
@@ -127,6 +167,8 @@ export type MapTotals = {
   pharmacies: number;
   withPharmacy: number;
   noPharmacy: number;
+  /** Clinics, doctors, dentists, hospitals, labs — the demand side. */
+  medical: number;
 };
 
 export type MapData = {
@@ -135,6 +177,7 @@ export type MapData = {
   edges: [number, number][];
   cells: MapCell[];
   pharmacies: MapPharmacy[];
+  medical: MapMedical[];
   bakhsh: MapShape[];
   dehestan: MapShape[];
   /** Province outline as rings of [lon, lat] — the silhouette stroke. */
@@ -314,11 +357,26 @@ export function loadMapData(): MapData {
     nearest_km: number | null;
     settlement: string | null;
     county: string | null;
+    address: string | null;
+    phone: string | null;
+    website: string | null;
+    rating: number | null;
+    reviews: number | null;
+    price_level: string | null;
+    hours_json: string | null;
+    photos_json: string | null;
+    summary: string | null;
+    maps_uri: string | null;
+    status: string | null;
   }>(`
     SELECT p.osm_type, p.osm_id, p.source, p.name, p.name_en, p.lat, p.lon,
-           p.nearest_km, a.name AS settlement, p.county
+           p.nearest_km, a.name AS settlement, p.county,
+           f.address, f.phone, f.website, f.rating, f.reviews, f.price_level,
+           f.hours_json, f.photos_json, f.summary, f.maps_uri, f.status
     FROM map_pharmacy p
     LEFT JOIN admin_area a ON a.id = p.nearest_area_id
+    LEFT JOIN pharmacy_profile f
+           ON f.external_id = p.external_id AND f.source = p.source
     ORDER BY p.osm_type, p.osm_id
   `).map((p) => ({
     id: `${p.osm_type}/${p.osm_id}`,
@@ -330,6 +388,49 @@ export function loadMapData(): MapData {
     km: p.nearest_km ?? 0,
     settlement: p.settlement,
     county: p.county,
+    profile: p.rating === null && p.website === null && p.phone === null
+      ? null
+      : {
+          address: p.address,
+          phone: p.phone,
+          website: p.website,
+          rating: p.rating,
+          reviews: p.reviews,
+          priceLevel: p.price_level,
+          hours: safeJson<string[]>(p.hours_json) ?? [],
+          photos: safeJson<{ name: string }[]>(p.photos_json)?.map((x) => x.name) ?? [],
+          summary: p.summary,
+          mapsUri: p.maps_uri,
+          status: p.status,
+        },
+  }));
+
+  const medical: MapMedical[] = all<{
+    id: number;
+    kind: MapMedical["kind"];
+    name: string;
+    lat: number;
+    lon: number;
+    nearest_km: number | null;
+    settlement: string | null;
+    county: string | null;
+    address: string | null;
+  }>(`
+    SELECT m.id, m.kind, m.name, m.lat, m.lon, m.nearest_km, m.address, m.county,
+           a.name AS settlement
+    FROM map_medical m
+    LEFT JOIN admin_area a ON a.id = m.nearest_area_id
+    ORDER BY m.kind, m.name
+  `).map((m) => ({
+    id: m.id,
+    kind: m.kind,
+    name: m.name,
+    lat: Math.round(m.lat * 1e4) / 1e4,
+    lon: Math.round(m.lon * 1e4) / 1e4,
+    km: m.nearest_km ?? 0,
+    address: m.address,
+    settlement: m.settlement,
+    county: m.county,
   }));
 
   const imp = one<{
@@ -415,6 +516,7 @@ export function loadMapData(): MapData {
     pharmacies: agg?.pharmacies ?? 0,
     withPharmacy: agg?.with_ph ?? 0,
     noPharmacy: (agg?.n ?? 0) - (agg?.with_ph ?? 0),
+    medical: medical.length,
   };
 
   return {
@@ -422,6 +524,7 @@ export function loadMapData(): MapData {
     edges,
     cells,
     pharmacies,
+    medical,
     bakhsh: readShapes("khuzestan_bakhsh_areas.geojson"),
     dehestan: readShapes("khuzestan_dehestan_areas.geojson"),
     outline: readOutline("khuzestan_outline.geojson"),

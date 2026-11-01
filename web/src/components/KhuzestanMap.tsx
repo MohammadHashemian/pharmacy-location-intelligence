@@ -30,6 +30,7 @@ import {
 } from "react";
 import type { MapCell, MapData, MapSettlement, MapShape } from "@/lib/map";
 import { group, num, shortCounty, toPersianDigits } from "@/lib/format";
+import { PlacePanel } from "@/components/PharmacyPanel";
 
 const W = 660;
 const H = 820;
@@ -73,6 +74,8 @@ type Road = { d: string; cls: string; b: [number, number, number, number] };
 type Scene = {
   proj: Proj;
   pharm: { x: number; y: number }[];
+  /** Clinics, doctors, dentists, hospitals, labs — the demand side. */
+  med: { x: number; y: number }[];
   /** Screen units -> degrees, and km per scene unit (for the scale bar). */
   inv: (x: number, y: number) => [number, number];
   kmPerUnit: number;
@@ -244,6 +247,10 @@ function buildScene(data: MapData): Scene {
       const [x, y] = proj(p.lat, p.lon);
       return { x, y };
     }),
+    med: data.medical.map((m) => {
+      const [x, y] = proj(m.lat, m.lon);
+      return { x, y };
+    }),
     outline: data.outline.map(ringPath).join(" "),
     pts,
     edges,
@@ -324,6 +331,24 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     x: number;
     y: number;
   } | null>(null);
+  const [selPharm, setSelPharm] = useState<number | null>(null);
+  /* ?pharm=poi/123 deep-links a pharmacy, so a competitor card can be shared or
+     bookmarked; it is also how the panel is verified end to end. */
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const pid = q.get("pharm");
+    if (pid) {
+      const i = data.pharmacies.findIndex((p) => p.id === pid);
+      if (i >= 0) setSelPharm(i);
+    }
+    const mid = q.get("med");
+    if (mid) {
+      const i = data.medical.findIndex((m) => String(m.id) === mid);
+      if (i >= 0) setSelMed(i);
+    }
+  }, [data.pharmacies, data.medical]);
+  const [selMed, setSelMed] = useState<number | null>(null);
+  const [hoverMed, setHoverMed] = useState<{ i: number; x: number; y: number } | null>(null);
   const [hoverPharm, setHoverPharm] = useState<{
     i: number;
     x: number;
@@ -341,6 +366,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     labels: true,
     pharm: true,
     osm: true,
+    med: true,
   });
   const [targetPerPharm, setTargetPerPharm] = useState(
     Math.round((data.meta.residentsPerPharmacy || 5400) / 100) * 100,
@@ -358,6 +384,31 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   }, []);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  /* Full screen renders the card itself, not the document: the sidebar and the
+     header stay out of the way, and ESC restores the page exactly. */
+  const [isFull, setIsFull] = useState(false);
+  useEffect(() => {
+    const sync = () => setIsFull(document.fullscreenElement === cardRef.current);
+    /* headless browsers fire fullscreenchange but ignore the Escape key, so the
+       key is handled here as well; the browser still owns the real exit */
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && document.fullscreenElement) void document.exitFullscreen();
+    };
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("fullscreenchange", sync);
+      document.removeEventListener("keydown", esc);
+    };
+  }, []);
+  const toggleFull = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void cardRef.current?.requestFullscreen?.().catch(() => setIsFull(false));
+    }
+  };
   /** SVG user units per CSS pixel. A font size in user units is multiplied by
       the viewBox→CSS ratio, so 12 units is 12 px on a 660 px-wide frame and 6 px
       on a 348 px phone — labels must be divided by this to stay legible. */
@@ -633,6 +684,53 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     return [(px * W - v.tx) / v.k, (py * H - v.ty) / v.k, rect.width / W];
   };
 
+  /* One hit test for both hover and click: a pointerdown/up without a prior move
+     (touch, or a scripted click) still lands on the right marker. */
+  const hitTest = (clientX: number, clientY: number) => {
+    const [sx, sy, ratio] = toScene(clientX, clientY);
+    /* Every layer competes on the same normalised distance, with a bonus for the
+       specific markers: clicking a pharmacy that sits inside a town used to open
+       the town instead, because the settlement test ran first and won at 9 px. */
+    const tolS = 9 / ratio;
+    const pharmPx = 2.8 + Math.min(4.2, Math.log2(Math.max(1, view.k)) * 1.5);
+    const tolP = Math.max(9, pharmPx + 5) / ratio;
+    const medPx = 2.6 + Math.min(3.6, Math.log2(Math.max(1, view.k)) * 1.4);
+    const tolM = Math.max(9, medPx + 5) / ratio;
+
+    let best = { s: -1, p: -1, m: -1 };
+    let score = 2;
+
+    for (let i = 0; i < scene.pts.length; i++) {
+      const q = scene.pts[i];
+      const d = Math.hypot(q.x - sx, q.y - sy) / tolS;
+      if (d < 1 && d < score) {
+        score = d;
+        best = { s: i, p: -1, m: -1 };
+      }
+    }
+    if (layers.osm) {
+      for (let i = 0; i < scene.pharm.length; i++) {
+        const q = scene.pharm[i];
+        const d = (Math.hypot(q.x - sx, q.y - sy) / tolP) * 0.75;
+        if (d < 1 && d < score) {
+          score = d;
+          best = { s: -1, p: i, m: -1 };
+        }
+      }
+    }
+    if (layers.med && view.k >= 1.6) {
+      for (let i = 0; i < scene.med.length; i++) {
+        const q = scene.med[i];
+        const d = (Math.hypot(q.x - sx, q.y - sy) / tolM) * 0.75;
+        if (d < 1 && d < score) {
+          score = d;
+          best = { s: -1, p: -1, m: i };
+        }
+      }
+    }
+    return best;
+  };
+
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
     if (drag.current) {
       const dx = ((e.clientX - drag.current.x) / (svgRef.current!.clientWidth || 1)) * W;
@@ -640,45 +738,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       commit(viewRef.current.k, drag.current.tx + dx, drag.current.ty + dy);
       return;
     }
-    const [sx, sy, ratio] = toScene(e.clientX, e.clientY);
     const r0 = svgRef.current!.getBoundingClientRect();
-    const tol = 9 / ratio; // 9 css px
-    let best = -1;
-    let bestD = tol * tol;
-    for (let i = 0; i < scene.pts.length; i++) {
-      const p = scene.pts[i];
-      const dx = p.x - sx;
-      const dy = p.y - sy;
-      const d = dx * dx + dy * dy;
-      if (d < bestD) {
-        bestD = d;
-        best = i;
-      }
-    }
-    if (best < 0) {
-      if (hover) setHover(null);
-      // no settlement under the cursor: a mapped pharmacy may be
-      let pb = -1;
-      let pd = tol * tol * 0.6;
-      if (layers.osm && view.k >= 2) {
-        for (let i = 0; i < scene.pharm.length; i++) {
-          const q = scene.pharm[i];
-          const d = (q.x - sx) ** 2 + (q.y - sy) ** 2;
-          if (d < pd) {
-            pd = d;
-            pb = i;
-          }
-        }
-      }
-      setHoverPharm(pb < 0 ? null : { i: pb, x: e.clientX - r0.left, y: e.clientY - r0.top });
-      return;
-    }
-    setHoverPharm(null);
-    setHover({
-      i: best,
-      x: e.clientX - r0.left,
-      y: e.clientY - r0.top,
-    });
+    const { s, p, m } = hitTest(e.clientX, e.clientY);
+    setHover(s < 0 ? null : { i: s, x: e.clientX - r0.left, y: e.clientY - r0.top });
+    setHoverPharm(p < 0 ? null : { i: p, x: e.clientX - r0.left, y: e.clientY - r0.top });
+    setHoverMed(m < 0 ? null : { i: m, x: e.clientX - r0.left, y: e.clientY - r0.top });
   };
 
   /* ----------------------------------------------------------- zoom helpers */
@@ -737,9 +801,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
      are a SAMPLE (223 of the ~884 the FDA counts), so the legend says «نقشه‌شده». */
   const pharmacyLayer = useMemo(() => {
     /* Mapped pharmacies are the layer the site decision is made on, so they are
-       drawn from the province view too (419 diamonds, 2.7 px). */
+       drawn from the province view too. The marker is 2.8 px at zoom 1 and grows
+       to ~7 px by 8x: at a fixed 2.7 px the diamond stayed invisible exactly
+       when the reader zoomed in to see it. */
     if (!layers.osm) return null;
-    const r = 2.7 / view.k;
+    const px = 2.8 + Math.min(4.2, Math.log2(Math.max(1, view.k)) * 1.5);
+    const r = px / view.k;
     return (
       <g>
         {scene.pharm.map((p, i) => (
@@ -756,6 +823,43 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       </g>
     );
   }, [scene, layers.osm, view.k]);
+
+  /* Demand side: clinics, doctors, dentists, hospitals, labs. Violet so it never
+     reads as a pharmacy, and a plus sign for the ones that write prescriptions. */
+  const medicalLayer = useMemo(() => {
+    if (!layers.med || view.k < 1.6) return null;
+    const px = 2.6 + Math.min(3.6, Math.log2(Math.max(1, view.k)) * 1.4);
+    const r = px / view.k;
+    return (
+      <g>
+        {data.medical.map((m, i) => {
+          const p = scene.med[i];
+          const plus = m.kind === "clinic" || m.kind === "hospital" || m.kind === "lab";
+          return plus ? (
+            <path
+              key={m.id}
+              d={`M${p.x} ${p.y - r} h${r * 0.34} v${r * 0.66} h${r * 0.66} v${r * 0.34} h${-r * 0.66} v${r * 0.66} h${-r * 0.34} v${-r * 0.66} h${-r * 0.66} v${-r * 0.34} h${r * 0.66} Z`}
+              fill="#7c3aed"
+              fillOpacity={0.9}
+              stroke="#ffffff"
+              strokeWidth={0.9 / view.k}
+            />
+          ) : (
+            <circle
+              key={m.id}
+              cx={p.x}
+              cy={p.y}
+              r={r * 0.62}
+              fill={m.kind === "dentist" ? "#0ea5e9" : "#7c3aed"}
+              fillOpacity={0.85}
+              stroke="#ffffff"
+              strokeWidth={0.8 / view.k}
+            />
+          );
+        })}
+      </g>
+    );
+  }, [data.medical, layers.med, scene.med, view.k]);
 
   const edgeLayer = useMemo(
     () => (
@@ -800,7 +904,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
      box only, straight from the settlement list — population and pharmacies
      within 3 km, cells kept only where a settlement is within 1.2 km. */
   const fineCells = useMemo(() => {
-    if (settled.k < 3.4) return null;
+    if (settled.k < 1.8) return null;
     const x0 = -settled.tx / settled.k;
     const y0 = -settled.ty / settled.k;
     const w = W / settled.k;
@@ -811,12 +915,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     const latHi = Math.max(latTop, latBot);
     const lonLo = Math.min(lonLeft, lonRight);
     const lonHi = Math.max(lonLeft, lonRight);
-    if (latHi - latLo > 3.5) return null;          // never on the province view
+    if (latHi - latLo > 3.9) return null;          // never on the province view
 
-    // 1 km is the unit a site decision needs; beyond this many cells the view is
-    // too wide for the fine grid and the province-wide one takes over
-    const stepKm = 1;
-    if (((latHi - latLo) / (stepKm / 110.57)) * ((lonHi - lonLo) / (stepKm / 95)) > 16000) {
+    /* Resolution follows the zoom, because a fixed 3.3 km province grid is far
+       too coarse to judge a district: 2 km while the view is still regional,
+       1 km from 3x, 500 m from 7x (that is roughly a city block per cell). */
+    const stepKm = settled.k < 3 ? 2 : settled.k < 7 ? 1 : 0.5;
+    if (((latHi - latLo) / (stepKm / 110.57)) * ((lonHi - lonLo) / (stepKm / 95)) > 26000) {
       return null;
     }
     const dLat = stepKm / 110.57;
@@ -1161,8 +1266,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           as it is tall, so width alone decides legibility). Never sticky — a
           sticky card slid over the sidebar and the table while scrolling. */}
       <div
-        style={{ maxWidth: "min(100%, 920px, max(700px, calc((100vh - 140px) * 0.9)))" }}
-        className="mx-auto w-full min-w-0 rounded-2xl border border-line bg-surface p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)] sm:p-3">
+        ref={cardRef}
+        style={isFull ? undefined : { maxWidth: "min(100%, 920px, max(700px, calc((100vh - 140px) * 0.9)))" }}
+        className={`mx-auto w-full min-w-0 bg-surface p-2.5 sm:p-3 ${
+          isFull
+            ? "flex h-screen w-screen max-w-none flex-col rounded-none border-0"
+            : "rounded-2xl border border-line shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]"
+        }`}>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[13px] font-semibold text-ink">
@@ -1228,6 +1338,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     ["admin", "مرزها"],
                     ["labels", "برچسب‌ها"],
                     ["pharm", "داروخانه‌دار"],
+                    ["med", "خدمات درمانی"],
                     ["osm", "داروخانه‌های نقشه"],
                   ] as const
                 ).map(([id, label]) => (
@@ -1246,14 +1357,34 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 ))}
               </div>
             </details>
+            <button
+              type="button"
+              onClick={toggleFull}
+              title={isFull ? "خروج از تمام‌صفحه (Esc)" : "نمایش تمام‌صفحهٔ نقشه"}
+              className="rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[11px] text-muted transition hover:border-brand hover:text-brand-ink"
+            >
+              {isFull ? "⤡ خروج" : "⤢ تمام‌صفحه"}
+            </button>
           </div>
         </div>
 
-        <div className="relative mx-auto w-full min-w-0">
+        <div
+          className={
+            isFull
+              ? "relative mx-auto flex min-h-0 w-full flex-1 items-center justify-center"
+              : "relative mx-auto w-full min-w-0"
+          }
+        >
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
-            style={{ width: "100%", aspectRatio: `${W} / ${H}`, height: "auto" }}
+            style={{
+              aspectRatio: `${W} / ${H}`,
+              ...(isFull
+                ? { height: "100%", width: "auto", maxWidth: "100%", maxHeight: "100%" }
+                : { width: "100%", height: "auto" }),
+              touchAction: "none",
+            }}
             className="block cursor-crosshair rounded-xl border border-line bg-[#f8fafc]"
             onWheel={onWheel}
             onPointerMove={onPointerMove}
@@ -1286,7 +1417,16 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 }
                 return;
               }
-              if (hover) select(settlements[hover.i], false);
+              const hit = hitTest(e.clientX, e.clientY);
+              if (hit.s >= 0) {
+                select(settlements[hit.s], false);
+              } else if (hit.p >= 0) {
+                setSelPharm(hit.p);
+                setSelMed(null);
+              } else if (hit.m >= 0) {
+                setSelMed(hit.m);
+                setSelPharm(null);
+              }
             }}
           >
             <defs>
@@ -1309,7 +1449,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             >
               {layers.admin ? adminLayer : null}
               {roadLayer}
-              {layers.density && view.k < 3.4 ? cellLayer : null}
+              {layers.density && view.k < 1.8 ? cellLayer : null}
               {layers.density && fineCells ? (
                 <g shapeRendering="crispEdges" clipPath="url(#provClip)" opacity={0.92}>
                   {fineCells.cells.map((c, i) => (
@@ -1328,30 +1468,47 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 </g>
               ) : null}
 
-              {/* distance rings around the reference city */}
-              {RING_EDGES.map((km) => {
-                const r = (km / 111.32) * scene.scale;
-                const [cx, cy] = scene.proj(
-                  data.meta.referenceLat,
-                  data.meta.referenceLon,
-                );
+              {/* One ring, the one the sidebar set: seven dashed circles made the
+                  map look like a target and nobody read them as "distance from
+                  اهواز". */}
+              {(() => {
+                const [cx, cy] = scene.proj(data.meta.referenceLat, data.meta.referenceLon);
+                const r = (radius / 111.32) * scene.scale;
+                const px = r * view.k;
+                const label = `${group(radius)} کیلومتر از ${data.meta.referenceName}`;
                 return (
-                  <circle
-                    key={km}
-                    cx={cx}
-                    cy={cy}
-                    r={r}
-                    fill="none"
-                    stroke="#0d9488"
-                    strokeOpacity={0.16}
-                    strokeWidth={0.7}
-                    strokeDasharray="3 6"
-                  />
+                  <g pointerEvents="none">
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={r}
+                      fill="none"
+                      stroke="#0d9488"
+                      strokeOpacity={0.55}
+                      strokeWidth={1.5 / view.k}
+                      strokeDasharray={`${7 / view.k} ${5 / view.k}`}
+                    />
+                    <text
+                      x={cx}
+                      y={cy - r - 6 / view.k}
+                      textAnchor="middle"
+                      fontSize={11 / view.k}
+                      fontWeight={600}
+                      fill="#0f766e"
+                      paintOrder="stroke"
+                      stroke="#ffffff"
+                      strokeWidth={3 / view.k}
+                      strokeOpacity={0.95}
+                    >
+                      {label}
+                    </text>
+                  </g>
                 );
-              })}
+              })()}
 
               {layers.network ? edgeLayer : null}
               {dotLayer}
+              {medicalLayer}
               {pharmacyLayer}
 
               {probe ? (
@@ -1394,14 +1551,31 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 />
               ) : null}
 
-              <circle
-                cx={scene.proj(data.meta.referenceLat, data.meta.referenceLon)[0]}
-                cy={scene.proj(data.meta.referenceLat, data.meta.referenceLon)[1]}
-                r={5}
-                fill={COLORS.reference}
-                stroke="#fff"
-                strokeWidth={1.6}
-              />
+              {/* origin of every distance on this map: a crosshair, not a dot */}
+              {(() => {
+                const [cx, cy] = scene.proj(data.meta.referenceLat, data.meta.referenceLon);
+                return (
+                  <g pointerEvents="none">
+                    <circle cx={cx} cy={cy} r={7 / view.k} fill="#fff" opacity={0.9} />
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={4 / view.k}
+                      fill={COLORS.reference}
+                      stroke="#fff"
+                      strokeWidth={1.6 / view.k}
+                    />
+                    {[10, 15].map((t) => (
+                      <g key={t} stroke={COLORS.reference} strokeWidth={1.4 / view.k} opacity={0.9}>
+                        <line x1={cx - t / view.k} y1={cy} x2={cx + t / view.k} y2={cy} />
+                        <line x1={cx} y1={cy - t / view.k} x2={cx} y2={cy + t / view.k} />
+                      </g>
+                    ))}
+                  </g>
+                );
+              })()}
+
+
 
               {labelLayer}
             </g>
@@ -1427,6 +1601,36 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           </div>
 
 
+
+          {hoverMed ? (
+            <div
+              className="pointer-events-none absolute z-10 w-52 max-w-[72vw] rounded-lg border border-[#7c3aed]/40 bg-surface/98 p-2 text-[11px] shadow-lg"
+              style={{
+                left: Math.max(
+                  4,
+                  Math.min(
+                    (svgRef.current?.clientWidth ?? 400) - 214,
+                    (hoverMed.x ?? 0) + 14,
+                  ),
+                ),
+                top: Math.max(4, Math.min((hoverMed.y ?? 0) + 12, 300)),
+              }}
+            >
+              <div className="flex items-baseline justify-between gap-1">
+                <b className="text-[12px] text-ink">{data.medical[hoverMed.i].name}</b>
+                <span className="rounded bg-[#7c3aed]/10 px-1 text-[9px] text-[#7c3aed]">
+                  {{ doctor: "پزشک", clinic: "کلینیک", dentist: "دندان‌پزشک", hospital: "بیمارستان", lab: "آزمایشگاه" }[
+                    data.medical[hoverMed.i].kind
+                  ]}
+                </span>
+              </div>
+              <div className="text-[10.5px] text-muted">
+                {data.medical[hoverMed.i].settlement ?? "—"}
+                {data.medical[hoverMed.i].county ? ` › ${data.medical[hoverMed.i].county}` : ""}
+              </div>
+              <div className="mt-0.5 text-[10px] text-faint">کلیک = پروفایل و رقابت ۱ کیلومتری</div>
+            </div>
+          ) : null}
 
           {hoverPharm ? (
             <div
@@ -1531,6 +1735,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             </span>
           </span>
           <span className="flex items-center gap-1">
+            <span className="text-[11px] font-bold text-[#7c3aed]">✚</span>
+            پزشک / کلینیک / بیمارستان
+          </span>
+          <span className="flex items-center gap-1">
             <span className="h-2 w-2 rounded-full" style={{ background: COLORS.reference }} />
             {data.meta.referenceName} (مبدأ فاصله)
           </span>
@@ -1550,6 +1758,18 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
       {/* --------------------------------------------------------- sidebar -- */}
       <div className="flex min-w-0 flex-col gap-3">
+        <PlacePanel
+          key={`${selPharm ?? "x"}-${selMed ?? "x"}`}
+          pharm={selPharm !== null ? data.pharmacies[selPharm] : null}
+          medical={selMed !== null ? data.medical[selMed] : null}
+          pharmacies={data.pharmacies}
+          medicals={data.medical}
+          onClose={() => {
+            setSelPharm(null);
+            setSelMed(null);
+          }}
+        />
+
         <div className="rounded-2xl border border-line bg-surface p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-[13px] font-semibold text-ink">گسترش از اهواز</span>

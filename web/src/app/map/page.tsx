@@ -50,6 +50,9 @@ async function LiveMap() {
                 <span className="rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-[11px] font-medium text-muted">
                   {group(t.pharmacies)} داروخانه
                 </span>
+                <span className="rounded-md border border-brand/20 bg-brand-soft px-2 py-1 text-[11px] font-medium text-brand-ink">
+                  {group(t.medical)} مرکز درمانی
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <Link

@@ -289,6 +289,32 @@ feeds it in two controlled ways, and neither invents a pharmacy number:
 python etl/link_admin_places.py --min-village 3000   # idempotent
 ```
 
+### Pharmacy profiles and the demand side
+
+Two more tables sit beside the map layer:
+
+| table | what | filled by |
+|---|---|---|
+| `pharmacy_profile` | Google's public record per pharmacy: rating, review count, phone, website, hours, up to 5 photo references, editorial summary | `python etl/enrich_pharmacy_profiles.py` |
+| `map_medical` | clinics, doctors, dentists, hospitals, labs (875 places) | `python etl/import_medical_services.py` |
+
+```bash
+python etl/enrich_pharmacy_profiles.py            # only places without a profile
+python etl/import_medical_services.py --check
+python etl/import_medical_services.py --pages 1   # 87 cities x 4 types, cached
+```
+
+* **Click a pharmacy** on `/map` → profile card: photo, ★ rating and review count,
+  phone, website, hours, «باز کردن در گوگلمپ», and the competition block — how many
+  pharmacies and how many medical places sit within 1 km, with a blunt verdict
+  (`اشباع` at 5+ pharmacies, `فرصت` when care is dense and pharmacies are not).
+* **Deep links** make a card shareable: `/map?pharm=<osm_type>/<osm_id>` and
+  `/map?med=<map_medical.id>`.
+* Photos go through `/api/place-photo?name=places/…/photos/…` — the key never
+  reaches the browser, and only photo resource names are accepted.
+* One pass costs ~600 Google events: free-tier for both SKUs, but Iran is still a
+  **Prohibited Territory** (see above) — Neshan/OSM remains the compliant source.
+
 ### Known limits of the layer
 
 * **No income per settlement exists in any loaded source.** The index is

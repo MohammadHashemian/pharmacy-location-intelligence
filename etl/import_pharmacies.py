@@ -522,7 +522,7 @@ def main() -> int:
         rows.append((
             "poi", point_id(p["lat"], p["lon"], p["hash"]), p["name"], None,
             p["lat"], p["lon"], best_id, round(best_d, 2), best_county,
-            p.get("address"), args.provider,
+            p.get("address"), args.provider, p.get("hash"),
         ))
         matched += best_d <= 3.0
 
@@ -539,8 +539,8 @@ def main() -> int:
     c.executemany("""
         INSERT OR REPLACE INTO map_pharmacy
           (osm_type, osm_id, name, name_en, lat, lon, nearest_area_id, nearest_km,
-           county, street, source)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+           county, street, source, external_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     """, rows)
     c.commit()
     print(f"wrote {len(rows)} rows (source='{args.provider}') — /map reads them on the "
