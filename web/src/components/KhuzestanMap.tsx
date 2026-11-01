@@ -994,32 +994,14 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     const inView = (x: number, y: number) =>
       x > vis.x0 - 30 && x < vis.x1 + 30 && y > vis.y0 - 30 && y < vis.y1 + 30;
 
-    /* A county and its capital share a name; drawing both puts «اهواز» twice on
-       the same spot, which reads as a rendering bug. Census names win. */
-    const cityNames = new Set(
-      settlements.filter((s) => s.kind === "city").map((s) => s.name),
-    );
-    if (k < 8)
-      for (const c of scene.counties) {
-      if (k < 2.6 && cityNames.has(shortCounty(c.name))) continue;
-      labels.push({
-        key: `c${c.name}`,
-        x: c.x,
-        y: c.y,
-        text: shortCounty(c.name),
-        size: 12.5 * u,
-        weight: 700,
-        fill: "#0f172a",
-        opacity: 0.9,
-        halo: 3.1,
-      });
-    }
     /* Province scale used to show county names only; without the towns the map
        read as an abstract blob. The biggest cities get a label from zoom 1. */
     if (k < 2.6) {
       const cap = compact ? 14 : 28;
       const shown = settlements
-        .filter((s) => s.kind === "city" && inside[indexOf.get(s.id) ?? 0] === 1)
+        /* every plotted town, not only those inside the radius ring: at province
+           scale the ring is 60 km and the map would show nine labels */
+        .filter((s) => s.kind === "city" && indexOf.get(s.id) !== undefined)
         .sort((a, b) => (b.pop ?? 0) - (a.pop ?? 0))
         .slice(0, cap);
       for (const s of shown) {
@@ -1039,6 +1021,30 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       }
     }
 
+    /* A county and its capital share a name; drawing both puts «اهواز» twice on
+       the same spot, which reads as a rendering bug. Census names win, and a
+       county label yields to any town label within 34 px (the Ahvaz ring:
+       کارون / باوی / ملاثانی pressed against the city name). */
+    const cityNames = new Set(
+      settlements.filter((s) => s.kind === "city").map((s) => s.name),
+    );
+    const townLabels = labels.filter((l) => l.key.startsWith("city"));
+    if (k < 8)
+      for (const c of scene.counties) {
+      if (k < 2.6 && cityNames.has(shortCounty(c.name))) continue;
+      if (k < 2.6 && townLabels.some((t) => Math.hypot(t.x - c.x, t.y - c.y) < 34)) continue;
+      labels.push({
+        key: `c${c.name}`,
+        x: c.x,
+        y: c.y,
+        text: shortCounty(c.name),
+        size: 12.5 * u,
+        weight: 700,
+        fill: "#0f172a",
+        opacity: 0.9,
+        halo: 3.1,
+      });
+    }
     if (k >= 2.1 && k < 16) {
       for (const b of scene.bakhsh) {
         if (!inView(b.lx, b.ly)) continue;
@@ -1492,7 +1498,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           ) : null}
         </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-soft">
           <span className="flex items-center gap-1">
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: COLORS.city }} />
             شهر

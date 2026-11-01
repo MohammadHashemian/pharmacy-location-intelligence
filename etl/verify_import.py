@@ -38,6 +38,14 @@ check("drops a street named داروخانه", not m.looks_like_pharmacy("خیا
 check("drops a square named داروخانه", not m.looks_like_pharmacy("میدان داروخانه", "square", "place"))
 check("drops a hospital", not m.looks_like_pharmacy("بیمارستان امام", "hospital", "health"))
 check("drops an unrelated POI", not m.looks_like_pharmacy("نانوایی سنگک", "bakery", "shop"))
+check("drops a vet clinic tagged pharmacy", not m.looks_like_pharmacy(
+    "Dr. Kazemi", "pharmacy,veterinary_care,health", ""))
+check("drops an insurance agency tagged pharmacy", not m.looks_like_pharmacy(
+    "بیمه سینا نمایندگی برزگر", "pharmacy,health,store", ""))
+check("drops a wholesaler tagged pharmacy", not m.looks_like_pharmacy(
+    "عمده فروشی", "pharmacy,health,store", ""))
+check("keeps a pharmacy named after a company", m.looks_like_pharmacy(
+    "داروخانه شرکت نفت", "pharmacy,health", ""))
 
 # 2. name normalisation --------------------------------------------------------
 check("ZWNJ/spacing folded", m.normalize_name("داروخانه‌ دکتر  بدری") == m.normalize_name("داروخانه دکتر بدری"))
