@@ -646,14 +646,63 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     if (g) g.setAttribute("transform", `translate(${tx} ${ty}) scale(${k})`);
   }, []);
 
+  /* Pointer -> viewBox coordinates through the SVG's own screen matrix. Reading
+     rect.width/W only works while the element keeps the viewBox aspect, which
+     stops being true the moment full screen crops it (preserveAspectRatio slice)
+     — the matrix is right in both layouts. */
+  const viewBoxPoint = (clientX: number, clientY: number): [number, number, number] => {
+    const svg = svgRef.current!;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return [0, 0, 1];
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const p = pt.matrixTransform(ctm.inverse());
+    return [p.x, p.y, ctm.a || 1];
+  };
+
+  /** The slice of the viewBox that is actually on screen (they differ in full
+      screen, where the map is cropped instead of letterboxed). */
+  const visibleBox = (): { x0: number; y0: number; x1: number; y1: number } => {
+    const svg = svgRef.current;
+    if (!svg) return { x0: 0, y0: 0, x1: W, y1: H };
+    const r = svg.getBoundingClientRect();
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return { x0: 0, y0: 0, x1: W, y1: H };
+    const inv = ctm.inverse();
+    const pt = svg.createSVGPoint();
+    pt.x = r.left;
+    pt.y = r.top;
+    const a = pt.matrixTransform(inv);
+    pt.x = r.right;
+    pt.y = r.bottom;
+    const b = pt.matrixTransform(inv);
+    return {
+      x0: Math.min(a.x, b.x),
+      y0: Math.min(a.y, b.y),
+      x1: Math.max(a.x, b.x),
+      y1: Math.max(a.y, b.y),
+    };
+  };
+
+  /* Bounds come from what the screen actually shows, not from the viewBox. In
+     full screen the map is cropped (xMidYMid slice), so the visible box is only a
+     window into the province and panning has to be allowed inside that window —
+     with the old `min = W - W*k` the map was nailed at translate(0,0) until you
+     zoomed, and the southern half was unreachable. */
   const clampView = useCallback((k: number, tx: number, ty: number) => {
     const kk = Math.max(1, Math.min(MAX_ZOOM, k));
-    const minX = W - W * kk;
-    const minY = H - H * kk;
+    const { x0, y0, x1, y1 } = visibleBox();
+    /* 0 is the ceiling: the scene never slides past its own top-left. The floor
+       is whatever makes the visible window's bottom-right edge reach the scene. */
+    const maxX = 0;
+    const maxY = 0;
+    const minX = Math.min(0, x1 - W * kk);
+    const minY = Math.min(0, y1 - H * kk);
     return {
       k: kk,
-      tx: Math.max(minX, Math.min(0, tx)),
-      ty: Math.max(minY, Math.min(0, ty)),
+      tx: Math.min(maxX, Math.max(minX, tx)),
+      ty: Math.min(maxY, Math.max(minY, ty)),
     };
   }, []);
 
@@ -667,21 +716,51 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     [applyView, clampView],
   );
 
+  const preFull = useRef<{ k: number; tx: number; ty: number } | null>(null);
+  useEffect(() => {
+    /* Entering full screen changes the element's geometry, and the browser
+       reports the old screen matrix until it has laid the new size out — so the
+       recentre is driven by the resize, not by the state flag. */
+    const svg = svgRef.current;
+    if (!svg) return;
+    const recentre = () => {
+      // idempotent: a resize is a layout change, not a pan, so re-running is safe
+      if (isFull) {
+        const v = viewRef.current;
+        const cx = (W / 2 - v.tx) / v.k;
+        const cy = (H / 2 - v.ty) / v.k;
+        const b = visibleBox();
+        commit(v.k, (b.x0 + b.x1) / 2 - cx * v.k, (b.y0 + b.y1) / 2 - cy * v.k);
+      } else if (preFull.current) {
+        const p = preFull.current;
+        preFull.current = null;
+        commit(p.k, p.tx, p.ty);
+        /* the restore lands while the element still reports full-screen geometry,
+           so it is clamped by the wrong bounds; re-apply once the page is back */
+        window.setTimeout(() => commit(p.k, p.tx, p.ty), 300);
+      }
+    };
+    if (isFull) preFull.current = viewRef.current;
+    const ro = new ResizeObserver(() => recentre());
+    ro.observe(svg);
+    const t = window.setTimeout(recentre, 220);
+    return () => {
+      ro.disconnect();
+      window.clearTimeout(t);
+    };
+  }, [isFull, commit]);
+
   const onWheel = (e: ReactWheelEvent<SVGSVGElement>) => {
-    const rect = svgRef.current!.getBoundingClientRect();
+    const [mx, my] = viewBoxPoint(e.clientX, e.clientY);
     const v = viewRef.current;
-    const mx = ((e.clientX - rect.left) / rect.width) * W;
-    const my = ((e.clientY - rect.top) / rect.height) * H;
     const k = Math.max(1, Math.min(MAX_ZOOM, v.k * Math.exp(-e.deltaY * 0.0016)));
     commit(k, mx - (mx - v.tx) * (k / v.k), my - (my - v.ty) * (k / v.k));
   };
 
   const toScene = (clientX: number, clientY: number): [number, number, number] => {
-    const rect = svgRef.current!.getBoundingClientRect();
-    const px = (clientX - rect.left) / rect.width;
-    const py = (clientY - rect.top) / rect.height;
+    const [px, py, scale] = viewBoxPoint(clientX, clientY);
     const v = viewRef.current;
-    return [(px * W - v.tx) / v.k, (py * H - v.ty) / v.k, rect.width / W];
+    return [(px - v.tx) / v.k, (py - v.ty) / v.k, scale];
   };
 
   /* One hit test for both hover and click: a pointerdown/up without a prior move
@@ -733,8 +812,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
     if (drag.current) {
-      const dx = ((e.clientX - drag.current.x) / (svgRef.current!.clientWidth || 1)) * W;
-      const dy = ((e.clientY - drag.current.y) / (svgRef.current!.clientHeight || 1)) * H;
+      const [, , scale] = viewBoxPoint(e.clientX, e.clientY);
+      const dx = (e.clientX - drag.current.x) / scale;
+      const dy = (e.clientY - drag.current.y) / scale;
       commit(viewRef.current.k, drag.current.tx + dx, drag.current.ty + dy);
       return;
     }
@@ -1378,10 +1458,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio={isFull ? "xMidYMid slice" : "xMidYMid meet"}
             style={{
-              aspectRatio: `${W} / ${H}`,
+              aspectRatio: isFull ? undefined : `${W} / ${H}`,
               ...(isFull
-                ? { height: "100%", width: "auto", maxWidth: "100%", maxHeight: "100%" }
+                ? { height: "100%", width: "100%" }
                 : { width: "100%", height: "auto" }),
               touchAction: "none",
             }}
@@ -1393,6 +1474,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               setHover(null);
             }}
             onPointerDown={(e) => {
+              // a drag must not leave a tooltip pinned over the map
+              setHover(null);
+              setHoverPharm(null);
+              setHoverMed(null);
               (e.target as Element).setPointerCapture?.(e.pointerId);
               drag.current = {
                 x: e.clientX,
