@@ -702,6 +702,35 @@ sources agree on (`v_admin_area_current`), so one article's typo — دزفول'
 figure printed on the city row — cannot outvote the other three. All four values
 remain queryable, with census year and confidence.
 
+### Mapped pharmacies — where an existing pharmacy actually is
+
+The FDA dashboard gives a **count per settlement** and no coordinates; it cannot
+put a pharmacy on a map. OSM does: `amenity=pharmacy` is a surveyed point. Both
+layers are kept, never merged:
+
+| | |
+|---|---|
+| `map_pharmacy` | one row per mapped pharmacy: osm id, name, lat/lon, nearest settlement, distance |
+| `v_map_pharmacy_mapped` | pharmacies within 3 km per settlement |
+| `khuzestan_pharmacies.geojson` | the same points as GeoJSON (54 KB) |
+
+```bash
+python etl/fetch_osm_pharmacies.py   # Overpass, cached in data/raw/osm/
+```
+
+**Coverage is the honest part:** OSM has **223** pharmacies in خوزستان against the
+**884** the FDA counts — roughly a quarter, concentrated in the well-mapped cities
+(اهواز 10, ماهشهر 7, دزفول 7, باغملک 6 …). The layer is therefore labelled
+«داروخانههای نقشه» and never presented as the complete set. A few OSM entries are
+mislabelled institutions («شبکه بهداشت شیبان» tagged as a pharmacy), which is why
+the popup shows the raw OSM name.
+
+To complete it, the same pipeline accepts any point-of-interest source — Google
+Places (`places:searchNearby`, needs a billing key, ~$10 for the province), Neshan
+or Map.ir (Iranian POI data, free tier with a key). Each returns name + point;
+`build_map_layer.py` then matches them to settlements and the map draws them the
+same way. Nothing else has to change: `map_pharmacy` is the contract.
+
 ### Commands
 
 ```bash

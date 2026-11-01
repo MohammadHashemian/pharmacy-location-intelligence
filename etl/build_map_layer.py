@@ -250,6 +250,67 @@ def union_rings(rings: list[list[tuple[float, float]]]) -> list[list[tuple[float
     return rings_out
 
 
+def export_pharmacies(pts: list[dict]) -> list[tuple]:
+    """Mapped pharmacy points (OSM `amenity=pharmacy`) + their nearest settlement.
+
+    The FDA feed counts pharmacies per settlement, the OSM layer locates the ones
+    somebody surveyed. Matching each point to the closest settlement within 3 km
+    is enough to say "this village has a mapped pharmacy 400 m away" without
+    pretending the two datasets are the same thing.
+    """
+    path = os.path.join(RAW, "khuzestan_pharmacies.json")
+    if not os.path.exists(path):
+        print("  pharmacies: data/raw/osm/khuzestan_pharmacies.json missing — run "
+              "etl/fetch_osm_pharmacies.py")
+        return []
+    payload = json.load(open(path, encoding="utf-8"))
+    rows, feats = [], []
+    for el in payload["elements"]:
+        t = el.get("tags") or {}
+        lat = el.get("lat") or (el.get("center") or {}).get("lat")
+        lon = el.get("lon") or (el.get("center") or {}).get("lon")
+        if lat is None or lon is None:
+            continue
+        best_i, best_d = None, 1e9
+        for p in pts:
+            d = haversine_km(lat, lon, p["lat"], p["lon"])
+            if d < best_d:
+                best_i, best_d = p, d
+        name = (t.get("name") or t.get("name:fa") or t.get("name:en") or "").strip() or None
+        rows.append((
+            el["type"], el["id"], name, t.get("name:en"),
+            round(lat, 6), round(lon, 6),
+            best_i["area_id"],
+            round(best_d, 2),
+            best_i["county"],
+            t.get("addr:street"),
+        ))
+        feats.append({
+            "type": "Feature",
+            "properties": {
+                "osm": f"{el['type']}/{el['id']}",
+                "name": name,
+                "name_en": t.get("name:en"),
+                "settlement": best_i["name"] if best_d <= 3.0 else None,
+                "nearest_km": round(best_d, 2),
+                "county": best_i["county"] if best_d <= 3.0 else None,
+            },
+            "geometry": {"type": "Point",
+                          "coordinates": [round(lon, 6), round(lat, 6)]},
+        })
+    fc = {"type": "FeatureCollection", "features": feats,
+          "_method": {"source": "Overpass node/way amenity=pharmacy",
+                      "matched": "nearest administrative settlement within 3 km"}}
+    out = os.path.join(OUT_GEO, "khuzestan_pharmacies.geojson")
+    json.dump(fc, open(out, "w", encoding="utf-8"), ensure_ascii=False,
+              separators=(",", ":"))
+    matched = sum(1 for r in rows if r[7] is not None and r[7] <= 3.0)
+    print(f"  khuzestan_pharmacies.geojson: {len(feats):,} points · "
+          f"{matched:,} within 3 km of a settlement · "
+          f"{os.path.getsize(out)/1024:.0f} KB")
+    return rows
+
+
 def export_polygons(filename: str, raw_name: str, tolerance: float,
                     extra: dict[str, dict]) -> dict:
     payload = json.load(open(os.path.join(RAW, raw_name), encoding="utf-8"))
@@ -591,12 +652,18 @@ def build_density(pts: list[dict], baseline: float) -> list[dict]:
 
 # --------------------------------------------------------------------------- #
 def write_db(c: sqlite3.Connection, pts: list[dict], graph: dict,
-             cells: list[dict], meta: dict) -> None:
+             cells: list[dict], meta: dict, pharmacies: list[tuple]) -> None:
     now = meta["built_at"]
     c.execute("DELETE FROM map_point")
     c.execute("DELETE FROM map_edge")
     c.execute("DELETE FROM map_density")
+    c.execute("DELETE FROM map_pharmacy")
     c.execute("DELETE FROM map_import")
+    c.executemany("""
+        INSERT OR REPLACE INTO map_pharmacy (osm_type, osm_id, name, name_en, lat,
+              lon, nearest_area_id, nearest_km, county, street)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+    """, pharmacies)
     c.executemany("""
         INSERT INTO map_point (area_id, lat, lon, coord_source, straight_km,
               road_km, road_minutes, net_km, est_km, dist_source, ring_km, deg, built_at)
@@ -705,6 +772,7 @@ def main() -> int:
           f"· {baseline:,.0f} residents per pharmacy")
 
     cells = build_density(pts, baseline)
+    pharmacies = export_pharmacies(pts)
 
     # --- admin polygons for the map background -----------------------------
     county_of = {}
@@ -775,7 +843,7 @@ def main() -> int:
                   f"link); pharmacy counts are the live FDA snapshot, admin-layer "
                   f"population as published"),
     }
-    write_db(c, pts, graph, cells, meta)
+    write_db(c, pts, graph, cells, meta, pharmacies)
 
     # --- one runnable check ------------------------------------------------
     if "--check" in sys.argv:
@@ -794,6 +862,10 @@ def main() -> int:
         total_ph = c.execute("SELECT SUM(pharmacy_total) FROM v_map_settlement "
                              "WHERE lat IS NOT NULL").fetchone()[0]
         assert total_ph == prov_ph, "pharmacy sum disagrees with v_map_pharmacy"
+        n_ph = c.execute("SELECT COUNT(*) FROM map_pharmacy").fetchone()[0]
+        assert n_ph > 100, f"only {n_ph} mapped pharmacies — the OSM fetch is missing"
+        n_matched = c.execute("SELECT COUNT(*) FROM v_map_pharmacy_mapped").fetchone()[0]
+        assert n_matched > 20, "mapped pharmacies are not matched to settlements"
         assert len(bakhsh_fc["features"]) == 67, "not every بخش produced a polygon"
         assert len(dehestan_fc["features"]) > 170, "دهستان polygons missing"
         area = sum(f["properties"]["area_km2"] for f in bakhsh_fc["features"])

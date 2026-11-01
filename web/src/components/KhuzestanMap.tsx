@@ -72,6 +72,7 @@ type Road = { d: string; cls: string; b: [number, number, number, number] };
 
 type Scene = {
   proj: Proj;
+  pharm: { x: number; y: number }[];
   /** Screen units -> degrees, and km per scene unit (for the scale bar). */
   inv: (x: number, y: number) => [number, number];
   kmPerUnit: number;
@@ -83,11 +84,22 @@ type Scene = {
   pts: { x: number; y: number; r: number }[];
   edges: [number, number, number, number][];
   cells: (MapCell & { x: number; y: number })[];
-  bakhsh: { d: string; name: string; county: string | null; lx: number; ly: number }[];
+  bakhsh: AdminShape[];
   outline: string;
-  dehestan: { d: string; name: string; county: string | null; lx: number; ly: number }[];
+  dehestan: AdminShape[];
   counties: { name: string; x: number; y: number }[];
-  dehestans: { name: string; x: number; y: number }[];
+  dehestans: { key: string; name: string; x: number; y: number }[];
+};
+
+type AdminShape = {
+  /** unique across the province; a name alone never is (see shapesOf) */
+  key: string;
+  d: string;
+  name: string;
+  county: string | null;
+  lx: number;
+  ly: number;
+  kind: "bakhsh" | "dehestan";
 };
 
 function buildScene(data: MapData): Scene {
@@ -129,10 +141,21 @@ function buildScene(data: MapData): Scene {
       )
       .join(" ");
 
-  const shapesOf = (list: MapShape[], kind: "bakhsh" | "dehestan") =>
+  const shapesOf = (list: MapShape[], kind: "bakhsh" | "dehestan"): AdminShape[] =>
     list.map((s) => {
       const [lx, ly] = proj(s.label[0], s.label[1]);
-      return { d: path(s), name: s.name, county: s.county, lx, ly, kind };
+      /* A name is not a key: «بخش مرکزی» exists in several شهرستان‌ها (67 بخش,
+         one named مرکزی per county) and 14 دهستان names span more than one
+         county. Keying on the name alone made React drop labels. */
+      return {
+        key: `${kind}:${s.county ?? ""}:${s.name}`,
+        d: path(s),
+        name: s.name,
+        county: s.county,
+        lx,
+        ly,
+        kind,
+      };
     });
 
   const bakhsh = shapesOf(data.bakhsh, "bakhsh");
@@ -176,20 +199,23 @@ function buildScene(data: MapData): Scene {
   }));
 
   // دهستان label from its settlements (only where there are enough of them to
-  // mean something — a one-village دهستان label is noise)
-  const dehAcc = new Map<string, { x: number; y: number; n: number }>();
+  // mean something — a one-village دهستان label is noise). Grouped by county as
+  // well as name: 14 names exist in more than one county, and averaging them
+  // together dropped a label between two places that are not the same place.
+  const dehAcc = new Map<string, { key: string; name: string; x: number; y: number; n: number }>();
   for (let i = 0; i < data.settlements.length; i++) {
     const s = data.settlements[i];
     if (!s.dehestan) continue;
-    const acc = dehAcc.get(s.dehestan) ?? { x: 0, y: 0, n: 0 };
+    const key = `${s.county ?? ""}|${s.dehestan}`;
+    const acc = dehAcc.get(key) ?? { key, name: s.dehestan, x: 0, y: 0, n: 0 };
     acc.x += pts[i].x;
     acc.y += pts[i].y;
     acc.n += 1;
-    dehAcc.set(s.dehestan, acc);
+    dehAcc.set(key, acc);
   }
-  const dehestans = [...dehAcc.entries()]
-    .filter(([, a]) => a.n >= 4)
-    .map(([name, a]) => ({ name, x: a.x / a.n, y: a.y / a.n }));
+  const dehestans = [...dehAcc.values()]
+    .filter((a) => a.n >= 4)
+    .map(({ key, name, x, y, n }) => ({ key, name, x: x / n, y: y / n }));
 
   const ringPath = (poly: number[][]) =>
     poly
@@ -210,6 +236,10 @@ function buildScene(data: MapData): Scene {
     scale,
     cellW: 0.033 * kx * scale,
     cellH: 0.03 * scale,
+    pharm: data.pharmacies.map((p) => {
+      const [x, y] = proj(p.lat, p.lon);
+      return { x, y };
+    }),
     outline: data.outline.map(ringPath).join(" "),
     pts,
     edges,
@@ -290,6 +320,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     x: number;
     y: number;
   } | null>(null);
+  const [hoverPharm, setHoverPharm] = useState<{
+    i: number;
+    x: number;
+    y: number;
+  } | null>(null);
   const [view, setView] = useState({ k: 1, tx: 0, ty: 0 });
   /** Authoritative view for gestures: wheel events fire faster than React can
       re-render, and a stale `view` here would drop every second notch. */
@@ -301,6 +336,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     admin: true,
     labels: true,
     pharm: true,
+    osm: true,
   });
   const [targetPerPharm, setTargetPerPharm] = useState(
     Math.round((data.meta.residentsPerPharmacy || 5400) / 100) * 100,
@@ -524,8 +560,14 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     const nearestCity = withDist.find((x) => x.s.kind === "city");
     const distAhvaz = km(probe.lat, probe.lon, data.meta.referenceLat, data.meta.referenceLon);
     const nearest = withDist.slice(0, 6);
-    return { radii, nearestCity, distAhvaz, nearest, point: probe };
-  }, [probe, settlements, targetPerPharm, data.meta.referenceLat, data.meta.referenceLon]);
+    /* the closest pharmacy somebody actually mapped, in km */
+    let nearestPharm: { name: string; km: number } | null = null;
+    for (const p of data.pharmacies) {
+      const d = km(probe.lat, probe.lon, p.lat, p.lon);
+      if (!nearestPharm || d < nearestPharm.km) nearestPharm = { name: p.name, km: d };
+    }
+    return { radii, nearestCity, distAhvaz, nearest, nearestPharm, point: probe };
+  }, [probe, settlements, targetPerPharm, data.meta.referenceLat, data.meta.referenceLon, data.pharmacies]);
 
   const ladder = useMemo(() => {
     const edges = [0, ...RING_EDGES];
@@ -595,6 +637,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       return;
     }
     const [sx, sy, ratio] = toScene(e.clientX, e.clientY);
+    const r0 = svgRef.current!.getBoundingClientRect();
     const tol = 9 / ratio; // 9 css px
     let best = -1;
     let bestD = tol * tol;
@@ -610,13 +653,27 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     }
     if (best < 0) {
       if (hover) setHover(null);
+      // no settlement under the cursor: a mapped pharmacy may be
+      let pb = -1;
+      let pd = tol * tol * 0.6;
+      if (layers.osm && view.k >= 2) {
+        for (let i = 0; i < scene.pharm.length; i++) {
+          const q = scene.pharm[i];
+          const d = (q.x - sx) ** 2 + (q.y - sy) ** 2;
+          if (d < pd) {
+            pd = d;
+            pb = i;
+          }
+        }
+      }
+      setHoverPharm(pb < 0 ? null : { i: pb, x: e.clientX - r0.left, y: e.clientY - r0.top });
       return;
     }
-    const r = svgRef.current!.getBoundingClientRect();
+    setHoverPharm(null);
     setHover({
       i: best,
-      x: e.clientX - r.left,
-      y: e.clientY - r.top,
+      x: e.clientX - r0.left,
+      y: e.clientY - r0.top,
     });
   };
 
@@ -668,6 +725,28 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     ),
     [scene, settlements, inside, selected, layers.pharm, view.k],
   );
+
+  /* Mapped pharmacies: exact points from OSM, drawn as diamonds above 2x. They
+     are a SAMPLE (223 of the ~884 the FDA counts), so the legend says «نقشه‌شده». */
+  const pharmacyLayer = useMemo(() => {
+    if (!layers.osm || view.k < 2) return null;
+    const r = 3.4 / view.k;
+    return (
+      <g>
+        {scene.pharm.map((p, i) => (
+          <path
+            key={i}
+            d={`M${p.x} ${p.y - r} L${p.x + r} ${p.y} L${p.x} ${p.y + r} L${p.x - r} ${p.y}Z`}
+            fill={COLORS.pharmacy}
+            fillOpacity={0.95}
+            stroke="#ffffff"
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </g>
+    );
+  }, [scene, layers.osm, view.k]);
 
   const edgeLayer = useMemo(
     () => (
@@ -924,7 +1003,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       for (const b of scene.bakhsh) {
         if (!inView(b.lx, b.ly)) continue;
         labels.push({
-          key: `b${b.name}`,
+          key: b.key,
           x: b.lx,
           y: b.ly,
           text: strip(b.name, "بخش "),
@@ -940,7 +1019,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       for (const d of scene.dehestans) {
         if (!inView(d.x, d.y)) continue;
         labels.push({
-          key: `d${d.name}`,
+          key: d.key,
           x: d.x,
           y: d.y,
           text: strip(d.name, "دهستان "),
@@ -1083,6 +1162,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 ["admin", "مرزها"],
                 ["labels", "برچسب‌ها"],
                 ["pharm", "داروخانه‌دار"],
+                ["osm", "داروخانه‌های نقشه"],
               ] as const
             ).map(([id, label]) => (
               <label
@@ -1204,6 +1284,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
               {layers.network ? edgeLayer : null}
               {dotLayer}
+              {pharmacyLayer}
 
               {probe ? (
                 <g pointerEvents="none">
@@ -1304,6 +1385,38 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 : `فقط داخل محدودهٔ مسکونی (≤${num(data.meta.maskKm, 1)} کم از یک آبادی)`}
             </div>
           </div>
+
+          {hoverPharm ? (
+            <div
+              className="pointer-events-none absolute z-10 w-56 max-w-[72vw] rounded-lg border border-warn/40 bg-surface/98 p-2 text-[11px] shadow-lg"
+              style={{
+                left: Math.max(
+                  4,
+                  Math.min(
+                    (svgRef.current?.clientWidth ?? 400) - 232,
+                    (hoverPharm.x ?? 0) + 14,
+                  ),
+                ),
+                top: Math.max(4, Math.min((hoverPharm.y ?? 0) + 12, 300)),
+              }}
+            >
+              <div className="flex items-baseline justify-between gap-1">
+                <b className="text-[12px] text-ink">{data.pharmacies[hoverPharm.i].name}</b>
+                <span className="rounded bg-warn-soft px-1 text-[9px] text-warn">OSM</span>
+              </div>
+              <div className="text-[10.5px] text-muted">
+                {data.pharmacies[hoverPharm.i].settlement ?? "—"}
+                {data.pharmacies[hoverPharm.i].county
+                  ? ` › ${shortCounty(data.pharmacies[hoverPharm.i].county ?? "")}`
+                  : ""}
+              </div>
+              <div className="tnum mt-0.5 text-[10.5px] text-faint">
+                {num(data.pharmacies[hoverPharm.i].lat, 4)} ,{" "}
+                {num(data.pharmacies[hoverPharm.i].lon, 4)} ·{" "}
+                {fmtKm(data.pharmacies[hoverPharm.i].km)} از آبادی
+              </div>
+            </div>
+          ) : null}
 
           {hoverS ? (
             <div
@@ -1482,6 +1595,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                   {probeStats.nearestCity
                     ? ` · نزدیک‌ترین شهر: ${probeStats.nearestCity.s.name} (${fmtKm(probeStats.nearestCity.km)})`
                     : ""}
+                  {probeStats.nearestPharm
+                    ? ` · نزدیک‌ترین داروخانهٔ نقشه‌شده: ${probeStats.nearestPharm.name} (${fmtKm(probeStats.nearestPharm.km)})`
+                    : " · هیچ داروخانهٔ نقشه‌شده‌ای ثبت نشده"}
                 </div>
               </div>
               <button
@@ -1571,6 +1687,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 ["خط مستقیم", fmtKm(selectedS.straight)],
                 ["شبکه/جادهٔ اندازه‌گیری‌شده", `${selectedS.net !== null ? fmtKm(selectedS.net) : "—"} / ${selectedS.road !== null ? fmtKm(selectedS.road) : "—"}`],
                 ["گام‌های شبکه", selectedS.deg === null ? "—" : group(selectedS.deg)],
+                ["داروخانهٔ نقشه‌شده (≤۳ کم)", group(selectedS.mapped)],
                 ["در فید سازمان", selectedS.inFda ? "بله" : "خیر"],
               ].map(([k, v]) => (
                 <div key={k} className="contents">

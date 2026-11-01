@@ -107,6 +107,37 @@ CREATE TABLE IF NOT EXISTS map_density (
 CREATE INDEX IF NOT EXISTS ix_map_density_xy ON map_density (lat, lon);
 
 -- ---------------------------------------------------------------------------
+-- M4b. Mapped pharmacies: OSM publishes the POINT of a pharmacy, the FDA feed
+--      publishes the COUNT per settlement. Both are kept, never merged: a row
+--      here is a pharmacy somebody surveyed on the ground, `nearest_km` says how
+--      far it is from the settlement it was matched to.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS map_pharmacy (
+  osm_type        TEXT NOT NULL,             -- node | way
+  osm_id          INTEGER NOT NULL,
+  name            TEXT,
+  name_en         TEXT,
+  lat             REAL NOT NULL,
+  lon             REAL NOT NULL,
+  nearest_area_id INTEGER REFERENCES admin_area (id) ON DELETE SET NULL,
+  nearest_km      REAL,
+  county          TEXT,
+  street          TEXT,
+  PRIMARY KEY (osm_type, osm_id)
+);
+CREATE INDEX IF NOT EXISTS ix_map_pharmacy_area ON map_pharmacy (nearest_area_id);
+
+-- one row per settlement: how many mapped pharmacies sit within 2 km of it
+DROP VIEW IF EXISTS v_map_pharmacy_mapped;
+CREATE VIEW v_map_pharmacy_mapped AS
+SELECT nearest_area_id AS area_id,
+       COUNT(*)       AS n_mapped,
+       MIN(nearest_km) AS nearest_km
+FROM map_pharmacy
+WHERE nearest_area_id IS NOT NULL AND nearest_km <= 3.0
+GROUP BY nearest_area_id;
+
+-- ---------------------------------------------------------------------------
 -- M5. Live pharmacy aggregate per admin area (FDA layer only).
 -- ---------------------------------------------------------------------------
 CREATE VIEW IF NOT EXISTS v_map_pharmacy AS
@@ -141,6 +172,7 @@ SELECT a.area_id,
        COALESCE(ph.pharmacy_legal, 0) AS pharmacy_legal,
        COALESCE(ph.pharmacy_real, 0) + COALESCE(ph.pharmacy_legal, 0) AS pharmacy_total,
        COALESCE(ph.n_fda_rows, 0)     AS n_fda_rows,
+       COALESCE(mp.n_mapped, 0)       AS pharmacy_mapped,
        p.straight_km,
        p.road_km,
        p.road_minutes,
@@ -150,6 +182,7 @@ SELECT a.area_id,
        p.ring_km,
        p.deg
 FROM v_admin_area_current a
-LEFT JOIN map_point p       ON p.area_id = a.area_id
-LEFT JOIN v_map_pharmacy ph ON ph.area_id = a.area_id
+LEFT JOIN map_point p            ON p.area_id = a.area_id
+LEFT JOIN v_map_pharmacy ph      ON ph.area_id = a.area_id
+LEFT JOIN v_map_pharmacy_mapped mp ON mp.area_id = a.area_id
 WHERE a.kind IN ('city', 'village');

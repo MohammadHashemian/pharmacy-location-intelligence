@@ -34,6 +34,8 @@ export type MapSettlement = {
   ph: number;
   phReal: number;
   phLegal: number;
+  /** Pharmacies mapped in OSM within 3 km of this settlement (a sample, not a total). */
+  mapped: number;
   inFda: boolean;
   /** Great-circle km from اهواز. */
   straight: number;
@@ -73,6 +75,19 @@ export type MapShape = {
   label: [number, number];
   /** Rings as [lon, lat] pairs, already simplified. */
   rings: number[][][];
+};
+
+/** One pharmacy somebody mapped on the ground (OSM `amenity=pharmacy`). */
+export type MapPharmacy = {
+  id: string;
+  name: string;
+  nameEn: string | null;
+  lat: number;
+  lon: number;
+  /** Distance to the nearest administrative settlement, km. */
+  km: number;
+  settlement: string | null;
+  county: string | null;
 };
 
 export type MapMeta = {
@@ -115,6 +130,7 @@ export type MapData = {
   /** [index a, index b] into `settlements`. */
   edges: [number, number][];
   cells: MapCell[];
+  pharmacies: MapPharmacy[];
   bakhsh: MapShape[];
   dehestan: MapShape[];
   /** Province outline as rings of [lon, lat] — the silhouette stroke. */
@@ -185,6 +201,7 @@ export function loadMapData(): MapData {
     pharmacy_legal: number;
     pharmacy_total: number;
     n_fda_rows: number;
+    pharmacy_mapped: number;
     straight_km: number;
     net_km: number | null;
     road_km: number | null;
@@ -196,7 +213,7 @@ export function loadMapData(): MapData {
   }>(`
     SELECT area_id, kind, name, county, bakhsh, dehestan, population,
            population_year_sh, population_source, lat, lon,
-           pharmacy_real, pharmacy_legal, pharmacy_total, n_fda_rows,
+           pharmacy_real, pharmacy_legal, pharmacy_total, n_fda_rows, pharmacy_mapped,
            straight_km, net_km, road_km, road_minutes, est_km, dist_source,
            ring_km, deg
     FROM v_map_settlement
@@ -224,6 +241,7 @@ export function loadMapData(): MapData {
     ph: r.pharmacy_total,
     phReal: r.pharmacy_real,
     phLegal: r.pharmacy_legal,
+    mapped: r.pharmacy_mapped,
     inFda: r.n_fda_rows > 0,
     straight: r1(r.straight_km),
     net: r.net_km === null ? null : r1(r.net_km),
@@ -271,6 +289,33 @@ export function loadMapData(): MapData {
     dehestan: c.dehestan,
     near: c.nearest_name,
     urban: c.nearest_urban,
+  }));
+
+  const pharmacies: MapPharmacy[] = all<{
+    osm_type: string;
+    osm_id: number;
+    name: string | null;
+    name_en: string | null;
+    lat: number;
+    lon: number;
+    nearest_km: number | null;
+    settlement: string | null;
+    county: string | null;
+  }>(`
+    SELECT p.osm_type, p.osm_id, p.name, p.name_en, p.lat, p.lon, p.nearest_km,
+           a.name AS settlement, p.county
+    FROM map_pharmacy p
+    LEFT JOIN admin_area a ON a.id = p.nearest_area_id
+    ORDER BY p.osm_type, p.osm_id
+  `).map((p) => ({
+    id: `${p.osm_type}/${p.osm_id}`,
+    name: p.name ?? "داروخانه (بینام)",
+    nameEn: p.name_en,
+    lat: Math.round(p.lat * 1e4) / 1e4,
+    lon: Math.round(p.lon * 1e4) / 1e4,
+    km: p.nearest_km ?? 0,
+    settlement: p.settlement,
+    county: p.county,
   }));
 
   const imp = one<{
@@ -362,6 +407,7 @@ export function loadMapData(): MapData {
     settlements,
     edges,
     cells,
+    pharmacies,
     bakhsh: readShapes("khuzestan_bakhsh_areas.geojson"),
     dehestan: readShapes("khuzestan_dehestan_areas.geojson"),
     outline: readOutline("khuzestan_outline.geojson"),
