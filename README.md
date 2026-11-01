@@ -354,6 +354,32 @@ python etl/reclassify_places.py            # report what the stored rows really 
 python etl/reclassify_places.py --apply    # delete the wrong, re-kind, move doctors out of the pharmacy layer
 ```
 
+### Population surface for the whole province (`etl/build_pop_province.py`)
+
+The 250 m `urban_pop.json` needs a city's street network, so it only exists for the
+cities fetched so far (اهواز). Everything else knew «settlement X holds N people at
+this one point», which is what the per-pharmacy ratio looked like it ignored outside
+اهواز.
+
+`build_pop_province.py` spreads every settlement's census population over a 1 km
+grid, weighting each cell by
+
+* `(1 - d/r)^2` inside the settlement's built-up radius `r` (2.5–12 km, same rule
+  as the map's residential mask),
+* **+0.6 per mapped POI** on the cell — a pharmacy or clinic does not stand in a
+  field, so those cells are built-up by definition,
+* and never inside a city already covered by the finer 250 m surface.
+
+```bash
+python etl/build_pop_province.py          # → web/public/geo/pop_province.json
+python etl/build_pop_province.py --cell-km 0.5
+```
+
+Result: **23,152 cells at 1 km, 3.45 M of 4.78 M people placed** (the remaining 1.33 M
+is the اهواز disc, which the 250 m file owns). The map loads both and sums whichever
+covers a cell, so «نفر به ازای داروخانه» now paints from the province view down to a
+village's outskirts.
+
 ### Urban detail: streets and a population surface
 
 The province layer knows where people live to the settlement, which is too coarse

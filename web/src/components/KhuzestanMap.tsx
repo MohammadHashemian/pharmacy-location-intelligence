@@ -473,6 +473,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const [popCells, setPopCells] = useState<{ lat: number; lon: number; pop: number }[] | null>(
     null,
   );
+  /* 1 km surface for the whole province (etl/build_pop_province.py). The 250 m
+     urban file covers the surveyed cities; this one covers everything else. */
+  const [popProvince, setPopProvince] = useState<
+    { lat: number; lon: number; pop: number }[] | null
+  >(null);
   /* Streets for the city the reader is zoomed into (one at a time, fetched on
      demand from /geo/streets_<slug>.json). */
   const streetCache = useRef<Map<string, { c: string; p: [number, number][] }[]>>(new Map());
@@ -497,6 +502,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         setPopCells(d.cells.map(([lat, lon, pop]) => ({ lat, lon, pop })));
       })
       .catch(() => setPopCells([]));
+    fetch("/geo/pop_province.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { cells?: [number, number, number][] } | null) => {
+        if (!alive || !d?.cells) return;
+        setPopProvince(d.cells.map(([lat, lon, pop]) => ({ lat, lon, pop })));
+      })
+      .catch(() => setPopProvince([]));
     return () => {
       alive = false;
     };
@@ -1245,7 +1257,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   }, [data.pharmacies, settlements]);
 
   const fineCells = useMemo(() => {
-    if (settled.k < 1.8) return null;
+    if (settled.k < 1.2) return null;
     const x0 = -settled.tx / settled.k;
     const y0 = -settled.ty / settled.k;
     const w = W / settled.k;
@@ -1261,7 +1273,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     /* Resolution follows the zoom, because a fixed 3.3 km province grid is far
        too coarse to judge a district: 2 km while the view is still regional,
        1 km from 3x, 500 m from 7x (that is roughly a city block per cell). */
-    const stepKm = settled.k < 3 ? 2 : settled.k < 7 ? 1 : 0.5;
+    const stepKm = settled.k < 1.6 ? 4 : settled.k < 3 ? 2 : settled.k < 7 ? 1 : 0.5;
     if (((latHi - latLo) / (stepKm / 110.57)) * ((lonHi - lonLo) / (stepKm / 95)) > 26000) {
       return null;
     }
@@ -1298,6 +1310,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       const list = popBuckets.get(kk);
       if (list) list.push(i);
       else popBuckets.set(kk, [i]);
+    });
+    const provBuckets: Map<number, number[]> = new Map();
+    (popProvince ?? []).forEach((pc, i) => {
+      const kk = key(pc.lat, pc.lon);
+      const list = provBuckets.get(kk);
+      if (list) list.push(i);
+      else provBuckets.set(kk, [i]);
     });
     const residualBuckets: Map<number, number[]> = new Map();
     supply.residual.forEach((r, i) => {
@@ -1364,6 +1383,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               const q = popCells![i];
               if (dist(la, lo, q.lat, q.lon) <= R) popHere += q.pop;
             }
+            for (const i of provBuckets.get(kk) ?? []) {
+              const q = popProvince![i];
+              if (dist(la, lo, q.lat, q.lon) <= R) popHere += q.pop;
+            }
           }
         }
         if (!near) continue;
@@ -1408,7 +1431,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       ? Math.max(1e-6, sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))])
       : 1;
     return { cells: out, max: maxV, cap, stepKm, dLat, dLon };
-  }, [settled, scene, settlements, mode, targetPerPharm, supply, popCells]);
+  }, [settled, scene, settlements, mode, targetPerPharm, supply, popCells, popProvince]);
 
   /* Roads: culled to the viewport and to the class the zoom level needs, then
      concatenated into two paths — 8k <path> nodes would choke the renderer. */
@@ -1885,7 +1908,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             >
               {layers.admin ? adminLayer : null}
               {roadLayer}
-              {layers.density && view.k < 1.8 ? cellLayer : null}
+              {layers.density && view.k < 1.2 ? cellLayer : null}
               {layers.density && fineCells ? (
                 <g shapeRendering="crispEdges" clipPath="url(#provClip)" opacity={0.92}>
                   {fineCells.cells.map((c, i) => (
