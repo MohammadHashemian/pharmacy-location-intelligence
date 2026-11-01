@@ -353,6 +353,29 @@ starts with a neighbourhood word (کوی/شهرک/محله/…) *and* ends with 
 in — «بیت باوی» and «کشت و صنعت کارون» are real names whose last word happens to be a
 county, and trimming them would destroy them.
 
+### Layer test (`tools/test_map_layers.py`)
+
+The map is hand-drawn SVG, so «the streets disappeared» can be four different bugs: the
+layer is off, the component returned null at this zoom, the city's street file never
+loaded, or something opaque is painted on top. Every layer group now carries a
+`data-layer` attribute and the test reads the paint order straight from the DOM.
+
+```bash
+python tools/test_map_layers.py                 # 10 cases, screenshots → tools/shots/layers/
+python tools/test_map_layers.py --only ahvaz-12x
+```
+
+For each case it asserts: the zoom the deep link asked for was applied; labels,
+pharmacy markers and density cells render; street polylines exist where a city has a
+street file (11,299 in اهواز, 4,994 دزفول, 1,256 رامهرمز) and are absent where none
+exists; satellite tiles load and the streets survive on top of them; imagery paints
+first and labels last; no page errors. Exit 1 on any failure.
+
+It found the real gap immediately: streets were **fetched from 5× and drawn from 4.5×**,
+so the 3–4.5× band — the first zoom after the province view — showed density cells over
+imagery with no streets at all. Fetching now starts at 2.5×, drawing at 3.2×, and
+panning past a city's disc no longer blanks the streets that are still on screen.
+
 ### Satellite base (`layers.sat`)
 
 The map is hand-rolled SVG, so the imagery is too: the visible scene box is inverted

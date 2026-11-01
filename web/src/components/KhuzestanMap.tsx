@@ -515,10 +515,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     };
   }, [mode, popCells]);
 
-  /* Streets: one city at a time, whichever the view is centred on, only above 5x —
-     a 40k-segment file has no business on a province view. */
+  /* Streets: one city at a time, whichever the view is centred on, fetched from
+     2.5x. It used to start at 5x and draw at 4.5x, which left a band where the map
+     showed density cells over imagery and no streets at all — the exact zoom a user
+     reaches first when they zoom into a town. */
   useEffect(() => {
-    if (!layers.streets || settled.k < 5) {
+    if (!layers.streets || settled.k < 2.5) {
       if (streetLines.length) setStreetLines([]);
       return;
     }
@@ -543,8 +545,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           best = c;
         }
       }
-      if (!best || bestD > best.r_km) {
-        if (alive) setStreetLines([]);
+      if (!best || bestD > best.r_km * 1.5) {
+        /* Out of every city's disc: keep what is already drawn rather than blanking
+           it, because those streets are still under the cursor and a flash of empty
+           imagery reads as a bug. */
         return;
       }
       if (streetCache.current.has(best.slug)) {
@@ -1140,7 +1144,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   /* Urban streets, projected once and grouped by class. Only the city the view
      is centred on is loaded, and only above ~5x. */
   const streetLayer = useMemo(() => {
-    if (!layers.streets || !streetLines.length || view.k < 4.5) return null;
+    if (!layers.streets || !streetLines.length || view.k < 3.2) return null;
     const byClass = new Map<string, string[]>();
     for (const seg of streetLines) {
       const pts = seg.p.map(([la, lo]) => scene.proj(la, lo));
@@ -1964,7 +1968,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}
             >
               {satTiles ? (
-                <g clipPath="url(#provClip)">
+                <g data-layer="satellite" clipPath="url(#provClip)">
                   {satTiles.tiles.map((t) => (
                     <image
                       key={t.key}
@@ -1980,10 +1984,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 </g>
               ) : null}
               {layers.admin ? adminLayer : null}
-              {roadLayer}
+              <g data-layer="roads">{roadLayer}</g>
               {layers.density && view.k < 1.2 ? cellLayer : null}
               {layers.density && fineCells ? (
-                <g shapeRendering="crispEdges" clipPath="url(#provClip)" opacity={0.92}>
+                <g data-layer="density" shapeRendering="crispEdges" clipPath="url(#provClip)" opacity={0.92}>
                   {fineCells.cells.map((c, i) => (
                     <rect
                       key={i}
@@ -2060,11 +2064,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 );
               })()}
 
-              {streetLayer}
-              {layers.network ? edgeLayer : null}
-              {dotLayer}
-              {medicalLayer}
-              {pharmacyLayer}
+              <g data-layer="streets">{streetLayer}</g>
+              <g data-layer="network">{layers.network ? edgeLayer : null}</g>
+              <g data-layer="settlements">{dotLayer}</g>
+              <g data-layer="medical">{medicalLayer}</g>
+              <g data-layer="pharmacy">{pharmacyLayer}</g>
 
               {probe ? (
                 <g pointerEvents="none">
@@ -2132,7 +2136,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
 
 
-              {labelLayer}
+              <g data-layer="labels">{labelLayer}</g>
             </g>
 
           </svg>

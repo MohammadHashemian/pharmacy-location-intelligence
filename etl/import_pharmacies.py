@@ -430,8 +430,16 @@ def main() -> int:
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
     def remember(name: str, pts: list[dict]) -> None:
+        """Write the cache atomically.
+
+        A plain json.dump truncates first, so a killed run left a half-written file
+        that the next run could not read — 145 answered centres lost in one Ctrl-C.
+        """
         cache[name] = pts
-        json.dump(cache, open(cache_path, "w", encoding="utf-8"), ensure_ascii=False)
+        tmp = cache_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+        os.replace(tmp, cache_path)
 
     if args.fixture:
         payload = json.load(open(args.fixture, encoding="utf-8"))
