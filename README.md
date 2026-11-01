@@ -976,7 +976,11 @@ same once a provider returns `lat/lng/name`:
 python etl/import_pharmacies.py --provider google --check
 python etl/import_pharmacies.py --provider google --dry-run --limit 5
 python etl/import_pharmacies.py --provider google            # 87 cities, ≤3 pages each
+python etl/import_pharmacies.py --provider google --refresh  # ignore the centre cache
 ```
+
+Every answered centre is cached in `data/derived/<provider>_poi_cache.json`, so a
+run that dies at city 60 resumes at 60 instead of paying for 1…59 again.
 
 * **Key**: `/settings` → the **Google Places** row. Create it in Google Cloud:
   enable **Places API (New)**, attach a **billing account**, then restrict the key

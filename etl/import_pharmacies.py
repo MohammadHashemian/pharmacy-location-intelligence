@@ -67,7 +67,12 @@ NON_PHARMACY_TYPES = {
     "neighbourhood", "neighborhood", "locality", "city", "town", "village",
     "hospital", "clinic", "polyclinic", "bus_station", "subway", "park",
     "address", "place_of_worship", "school", "university", "route", "street_address",
+    # Google tags a few of these «pharmacy» too; none of them dispenses to patients
+    "veterinary_care", "insurance_agency", "doctor", "dentist", "bank", "finance",
 }
+# Businesses sitting next to a pharmacy and mistyped as one (seen in Abadan:
+# «بیمه سینا نمایندگی برزگر», «عمده فروشی»). The name, not the type, gives them away.
+NAME_BLOCK = ("بیمه", "نمایندگی", "عمده", "پخش", "انبار", "توزیع", "wholesale")
 
 ZWNJ = "\u200c"
 
@@ -85,10 +90,18 @@ def haversine_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> floa
 
 
 def looks_like_pharmacy(title: str, ptype: str, category: str) -> bool:
-    hay = f"{title} {ptype} {category}".lower()
-    if not any(h in hay for h in PHARMACY_HINTS):
+    """True only for something that dispenses medicine to patients.
+
+    ptype may be one word (Neshan) or a comma-joined list (Google), so the type
+    check is on tokens, not on the whole string.
+    """
+    tokens = {t for t in re.split(r"[\s,]+", f"{ptype} {category}".lower()) if t}
+    if tokens & NON_PHARMACY_TYPES:
         return False
-    return ptype.strip().lower() not in NON_PHARMACY_TYPES
+    if any(m in title for m in NAME_BLOCK):
+        return False
+    hay = f"{title} {ptype} {category}".lower()
+    return any(h in hay for h in PHARMACY_HINTS)
 
 
 def normalize_name(name: str) -> str:
@@ -324,6 +337,8 @@ def main() -> int:
     ap.add_argument("--pause", type=float, default=0.35)
     ap.add_argument("--page-pause", type=float, default=2.0, help="google pageToken wait")
     ap.add_argument("--keep-unmatched", action="store_true")
+    ap.add_argument("--refresh", action="store_true",
+                    help="ignore the per-centre cache and call the provider again")
     args = ap.parse_args()
 
     c = sqlite3.connect(DB)
@@ -368,6 +383,20 @@ def main() -> int:
 
     raw_points: list[dict] = []
     calls = 0
+    # Every answered centre is cached, so a run that dies at city 60 resumes at 60
+    # instead of paying for 1…59 again (Google bills per event).
+    cache_path = os.path.join(HOME, "data", "derived", f"{args.provider}_poi_cache.json")
+    cache: dict[str, list[dict]] = {}
+    if not args.refresh and os.path.exists(cache_path):
+        try:
+            cache = json.load(open(cache_path, encoding="utf-8"))
+        except json.JSONDecodeError:
+            cache = {}
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+
+    def remember(name: str, pts: list[dict]) -> None:
+        cache[name] = pts
+        json.dump(cache, open(cache_path, "w", encoding="utf-8"), ensure_ascii=False)
 
     if args.fixture:
         payload = json.load(open(args.fixture, encoding="utf-8"))
@@ -389,7 +418,11 @@ def main() -> int:
         print(f"google: {len(centres)} centres · up to {args.pages} pages of 20 each")
         codes: dict[int, int] = {}
         for i, (name, la, lo) in enumerate(centres, 1):
+            if name in cache:
+                raw_points.extend(cache[name])
+                continue
             token, page = None, 0
+            here: list[dict] = []
             while page < args.pages:
                 code, places, token, detail = call_google(
                     key, args.term, la, lo, int(args.radius_km * 1000), token)
@@ -405,11 +438,13 @@ def main() -> int:
                 for pl in places:
                     p = google_item_to_point(pl)
                     if p:
-                        raw_points.append(p)
+                        here.append(p)
                 page += 1
                 if not token:
                     break
                 time.sleep(args.page_pause)
+            raw_points.extend(here)
+            remember(name, here)
             if i % 10 == 0:
                 print(f"  [{i}/{len(centres)}] {name}: points so far {len(raw_points)}")
             time.sleep(args.pause)
@@ -422,6 +457,9 @@ def main() -> int:
         print(f"service: {service} · {len(centres)} centres")
         codes = {}
         for i, (name, la, lo) in enumerate(centres, 1):
+            if name in cache:
+                raw_points.extend(cache[name])
+                continue
             if service == "nearby":
                 code, items = call_nearby(key, la, lo, args.radius)
             else:
@@ -434,15 +472,22 @@ def main() -> int:
                     return 3
                 time.sleep(1.0)
                 continue
+            here = []
             for it in items:
                 p = item_to_point(it)
                 if p:
-                    raw_points.append(p)
+                    here.append(p)
+            raw_points.extend(here)
+            remember(name, here)
             if i % 10 == 0:
                 print(f"  [{i}/{len(centres)}] {name}: {len(items)} results "
                       f"(points so far {len(raw_points)})")
             time.sleep(args.pause)
         print(f"HTTP {dict(sorted(codes.items()))}")
+
+    reused = sum(1 for n, _la, _lo in centres if n in cache)
+    if reused:
+        print(f"cache: {reused}/{len(centres)} centres reused from {os.path.basename(cache_path)}")
 
     points, dup_stats = dedupe_points(raw_points)
     print(f"{len(points)} unique pharmacies from {len(raw_points)} results "
@@ -475,8 +520,9 @@ def main() -> int:
             dropped += 1
             continue
         rows.append((
-            args.provider, point_id(p["lat"], p["lon"], p["hash"]), p["name"], None,
-            p["lat"], p["lon"], best_id, round(best_d, 2), best_county, p.get("address"),
+            "poi", point_id(p["lat"], p["lon"], p["hash"]), p["name"], None,
+            p["lat"], p["lon"], best_id, round(best_d, 2), best_county,
+            p.get("address"), args.provider,
         ))
         matched += best_d <= 3.0
 

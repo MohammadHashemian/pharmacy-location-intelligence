@@ -19,13 +19,13 @@ async function LiveMap() {
   return (
     <>
       <header className="mb-3">
-        <div className="rounded-2xl border border-line bg-linear-to-l from-brand/[0.10] via-accent/[0.07] to-transparent px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_30px_-16px_rgba(15,23,42,0.25)] sm:px-5">
+        <div className="rounded-2xl border border-line bg-linear-to-l from-brand/[0.10] via-accent/[0.07] to-transparent px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_10px_30px_-16px_rgba(15,23,42,0.25)] sm:px-4">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
-              <h1 className="text-[17px] font-extrabold tracking-tight text-ink sm:text-[20px]">
+              <h1 className="text-[16px] font-extrabold tracking-tight text-ink sm:text-[18px]">
                 نقشهٔ استان خوزستان — سکونتگاه، جمعیت و تراکم داروخانه
               </h1>
-              <p className="mt-1 max-w-3xl text-[11.5px] leading-[1.6] text-muted">
+              <p className="mt-1 hidden max-w-3xl text-[11.5px] leading-[1.55] text-muted sm:block">
                 هر شهر و روستایی که مختصات دارد، با نام شهرستان / بخش / دهستان،
                 جمعیت و تعداد داروخانهٔ ثبت‌شده‌اش. رنگ روی نقشه فقط داخل محدودهٔ
                 مسکونی رسم می‌شود، و فاصلهٔ هر نقطه از اهواز روی یک گراف شبکه‌ای
@@ -94,7 +94,7 @@ function Loading() {
 
 export default function Page() {
   return (
-    <main className="mx-auto max-w-[1240px] px-3 py-5 sm:px-5 sm:py-6">
+    <main className="mx-auto max-w-[1240px] px-3 py-3 sm:px-4 sm:py-4">
       <Suspense fallback={<Loading />}>
         <LiveMap />
       </Suspense>

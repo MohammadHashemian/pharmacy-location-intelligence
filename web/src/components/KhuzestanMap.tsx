@@ -47,7 +47,7 @@ const COLORS = {
 
 /* density ramps: low → high. The first stop is nearly transparent so an empty
    area stays "no data" instead of "healthy". */
-const DENS_RAMP = ["#f0fdfa", "#99f6e4", "#2dd4bf", "#0d9488", "#115e59"];
+const DENS_RAMP = ["#f2fdfb", "#ccfbf1", "#5eead4", "#14b8a6", "#0d9488"];
 const GAP_RAMP = ["#fef3c7", "#fcd34d", "#fb923c", "#f43f5e", "#9f1239"];
 
 function ramp(stops: string[], t: number): string {
@@ -165,7 +165,10 @@ function buildScene(data: MapData): Scene {
   const pts = data.settlements.map((p) => {
     const [x, y] = proj(p.lat, p.lon);
     const pop = p.pop ?? 0;
-    return { x, y, r: 2.1 + Math.min(7, Math.sqrt(pop) / 60) };
+    /* Screen-constant radius: 1.3 px for a hamlet, 4.6 px for a 300k city.
+       It used to reach 9 px, which merged neighbours into one blob and hid the
+       density cells underneath. */
+    return { x, y, r: 1.3 + Math.min(3.3, Math.sqrt(Math.max(0, pop)) / 150) };
   });
 
   const edges: [number, number, number, number][] = data.edges.map(([a, b]) => [
@@ -704,6 +707,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           const on = inside[i] === 1;
           const isSel = s.id === selected;
           const city = s.kind === "city";
+          /* 3,677 dots on one province view is a texture, not a map: below 2x a
+             village only appears once it holds 5,000 people (or is selected). */
+          if (!city && view.k < 2 && (s.pop ?? 0) < 2500 && s.id !== selected) return null;
           /* Screen-constant symbol: a marker must stay a marker when the map is
              zoomed 20x, otherwise the whole town is one dot. */
           const r = (p.r + (isSel ? 2 : 0)) / view.k;
@@ -730,8 +736,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   /* Mapped pharmacies: exact points from OSM, drawn as diamonds above 2x. They
      are a SAMPLE (223 of the ~884 the FDA counts), so the legend says «نقشه‌شده». */
   const pharmacyLayer = useMemo(() => {
-    if (!layers.osm || view.k < 2) return null;
-    const r = 3.4 / view.k;
+    /* Mapped pharmacies are the layer the site decision is made on, so they are
+       drawn from the province view too (419 diamonds, 2.7 px). */
+    if (!layers.osm) return null;
+    const r = 2.7 / view.k;
     return (
       <g>
         {scene.pharm.map((p, i) => (
@@ -767,7 +775,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     const hi = Math.max(1e-9, p(0.97));
     return (
       <g
-        opacity={view.k >= 3.4 ? 0 : Math.max(0.2, 0.85 - (view.k - 1) * 0.16)}
+        opacity={view.k >= 3.4 ? 0 : Math.max(0.18, 0.78 - (view.k - 1) * 0.16)}
         shapeRendering="crispEdges"
         clipPath="url(#provClip)"
       >
@@ -779,7 +787,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             width={scene.cellW + 0.4}
             height={scene.cellH + 0.4}
             fill={ramp(mode === "dens" ? DENS_RAMP : GAP_RAMP, vals[i] / hi)}
-            fillOpacity={mode === "gap" && vals[i] <= 0 ? 0.15 : 0.9}
+            fillOpacity={mode === "gap" && vals[i] <= 0 ? 0.15 : 0.62}
           />
         ))}
       </g>
@@ -986,20 +994,51 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     const inView = (x: number, y: number) =>
       x > vis.x0 - 30 && x < vis.x1 + 30 && y > vis.y0 - 30 && y < vis.y1 + 30;
 
+    /* A county and its capital share a name; drawing both puts «اهواز» twice on
+       the same spot, which reads as a rendering bug. Census names win. */
+    const cityNames = new Set(
+      settlements.filter((s) => s.kind === "city").map((s) => s.name),
+    );
     if (k < 8)
       for (const c of scene.counties) {
+      if (k < 2.6 && cityNames.has(shortCounty(c.name))) continue;
       labels.push({
         key: `c${c.name}`,
         x: c.x,
         y: c.y,
         text: shortCounty(c.name),
-        size: 13 * u,
+        size: 12.5 * u,
         weight: 700,
-        fill: "#1e293b",
-        opacity: 0.82,
-        halo: 2.2,
+        fill: "#0f172a",
+        opacity: 0.9,
+        halo: 3.1,
       });
     }
+    /* Province scale used to show county names only; without the towns the map
+       read as an abstract blob. The biggest cities get a label from zoom 1. */
+    if (k < 2.6) {
+      const cap = compact ? 14 : 28;
+      const shown = settlements
+        .filter((s) => s.kind === "city" && inside[indexOf.get(s.id) ?? 0] === 1)
+        .sort((a, b) => (b.pop ?? 0) - (a.pop ?? 0))
+        .slice(0, cap);
+      for (const s of shown) {
+        const p = scene.pts[indexOf.get(s.id)!];
+        if (!inView(p.x, p.y)) continue;
+        labels.push({
+          key: `city${s.id}`,
+          x: p.x,
+          y: p.y - (p.r + 2.6) / k,
+          text: s.name,
+          size: 11.5 * u,
+          weight: 600,
+          fill: "#0f172a",
+          opacity: 0.95,
+          halo: 2.8,
+        });
+      }
+    }
+
     if (k >= 2.1 && k < 16) {
       for (const b of scene.bakhsh) {
         if (!inView(b.lx, b.ly)) continue;
@@ -1008,11 +1047,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           x: b.lx,
           y: b.ly,
           text: strip(b.name, "بخش "),
-          size: 10 * u,
+          size: 10.5 * u,
           weight: 500,
-          fill: "#475569",
-          opacity: 0.7,
-          halo: 1.6,
+          fill: "#334155",
+          opacity: 0.8,
+          halo: 2.6,
         });
       }
     }
@@ -1024,11 +1063,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           x: d.x,
           y: d.y,
           text: strip(d.name, "دهستان "),
-          size: 9.5 * u,
+          size: 10 * u,
           weight: 400,
-          fill: "#64748b",
-          opacity: 0.68,
-          halo: 2,
+          fill: "#475569",
+          opacity: 0.78,
+          halo: 2.6,
         });
       }
     }
@@ -1058,11 +1097,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             k >= 6 && dupNames.has(s.name) && s.county
               ? `${s.name} · ${shortCounty(s.county)}${ph}`
               : `${s.name}${ph}`,
-          size: 9.5 * u,
+          size: 10.5 * u,
           weight: s.ph > 0 ? 600 : 450,
-          fill: s.ph > 0 ? "#0b3b36" : "#1e293b",
-          opacity: 0.95,
-          halo: 2.2,
+          fill: s.ph > 0 ? "#0b3b36" : "#0f172a",
+          opacity: 0.96,
+          halo: 2.8,
         });
       }
     }
@@ -1104,11 +1143,15 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const hoverS = hover ? settlements[hover.i] : null;
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
       {/* ------------------------------------------------------------ map -- */}
+      {/* The map is the point of the page: it takes the whole column and only
+          gives up width when the window is short (the province is 0.805 as wide
+          as it is tall, so width alone decides legibility). Never sticky — a
+          sticky card slid over the sidebar and the table while scrolling. */}
       <div
-        style={{ maxWidth: "min(100%, 760px, max(430px, calc((100vh - 360px) * 0.805)))" }}
-        className="mx-auto w-full min-w-0 rounded-2xl border border-line bg-surface p-2 shadow sm:p-3-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)] xl:sticky xl:top-3 xl:self-start">
+        style={{ maxWidth: "min(100%, 920px, max(700px, calc((100vh - 140px) * 0.9)))" }}
+        className="mx-auto w-full min-w-0 rounded-2xl border border-line bg-surface p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)] sm:p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[13px] font-semibold text-ink">
@@ -1118,14 +1161,39 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               {group(settlements.length)} نقطه · {group(scene.cells.length)} سلول مسکونی
             </span>
           </div>
-          <div className="flex w-full flex-wrap items-center gap-1 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:pb-1">
+          <div className="flex w-full flex-wrap items-center gap-1.5">
+            {/* one segmented control instead of two loose mode buttons */}
+            <div className="flex overflow-hidden rounded-lg border border-line-strong">
+              {(
+                [
+                  ["dens", "تراکم داروخانه"],
+                  ["gap", "شکاف ظرفیت"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setMode(id);
+                    setLayers((l) => ({ ...l, density: true }));
+                  }}
+                  className={`px-2.5 py-1 text-[11px] font-medium transition ${
+                    mode === id && layers.density
+                      ? "bg-brand-soft text-brand-ink"
+                      : "bg-surface text-muted hover:text-ink"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => {
                 setProbeMode((v) => !v);
                 if (probeMode) setProbe(null);
               }}
-              className={`shrink-0 rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
+              className={`shrink-0 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition ${
                 probeMode
                   ? "border-danger/40 bg-danger-soft text-danger"
                   : "border-line bg-surface text-muted hover:text-ink"
@@ -1134,51 +1202,39 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             >
               {probeMode ? "روی نقشه کلیک کنید…" : "تحلیل یک نقطه"}
             </button>
-            {(
-              [
-                ["dens", "تراکم داروخانه"],
-                ["gap", "شکاف ظرفیت"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setMode(id);
-                  setLayers((l) => ({ ...l, density: true }));
-                }}
-                className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
-                  mode === id && layers.density
-                    ? "border-brand/40 bg-brand-soft text-brand-ink"
-                    : "border-line bg-surface text-muted hover:text-ink"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-            {(
-              [
-                ["density", "سلول تراکم"],
-                ["network", "شبکهٔ فاصله"],
-                ["admin", "مرزها"],
-                ["labels", "برچسب‌ها"],
-                ["pharm", "داروخانه‌دار"],
-                ["osm", "داروخانه‌های نقشه"],
-              ] as const
-            ).map(([id, label]) => (
-              <label
-                key={id}
-                className="flex cursor-pointer items-center gap-1 rounded-lg border border-line bg-surface px-2 py-1 text-[11px] text-muted"
-              >
-                <input
-                  type="checkbox"
-                  className="h-3 w-3 accent-[#0d9488]"
-                  checked={layers[id]}
-                  onChange={(e) => setLayers((l) => ({ ...l, [id]: e.target.checked }))}
-                />
-                {label}
-              </label>
-            ))}
+            {/* six checkboxes used to eat three wrapped rows; they live in one
+                popover now, and the toolbar stays a single line */}
+            <details className="relative sm:ml-auto">
+              <summary className="flex cursor-pointer list-none items-center gap-1 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[11px] text-muted transition hover:text-ink">
+                لایه‌های نقشه
+                <span aria-hidden className="text-[9px] leading-none">▾</span>
+              </summary>
+              <div className="absolute left-0 z-30 mt-1 grid w-48 gap-0.5 rounded-xl border border-line bg-surface p-2 shadow-xl">
+                {(
+                  [
+                    ["density", "سلول تراکم"],
+                    ["network", "شبکهٔ فاصله"],
+                    ["admin", "مرزها"],
+                    ["labels", "برچسب‌ها"],
+                    ["pharm", "داروخانه‌دار"],
+                    ["osm", "داروخانه‌های نقشه"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <label
+                    key={id}
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] text-ink-soft hover:bg-surface-2"
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-3 w-3 accent-[#0d9488]"
+                      checked={layers[id]}
+                      onChange={(e) => setLayers((l) => ({ ...l, [id]: e.target.checked }))}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </details>
           </div>
         </div>
 
@@ -1255,7 +1311,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                       fill={ramp(mode === "dens" ? DENS_RAMP : GAP_RAMP, c.v / fineCells.max)}
                       /* low-value cells fade instead of painting white blocks
                          that read as buildings on a pale basemap */
-                      fillOpacity={0.22 + 0.7 * Math.min(1, c.v / fineCells.max)}
+                      fillOpacity={0.10 + 0.38 * Math.min(1, c.v / fineCells.max)}
                     />
                   ))}
                 </g>
@@ -1276,9 +1332,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     r={r}
                     fill="none"
                     stroke="#0d9488"
-                    strokeOpacity={0.22}
-                    strokeWidth={0.8}
-                    strokeDasharray="4 5"
+                    strokeOpacity={0.16}
+                    strokeWidth={0.7}
+                    strokeDasharray="3 6"
                   />
                 );
               })}
@@ -1338,17 +1394,6 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
               {labelLayer}
             </g>
-            <text
-              x={W - 12}
-              y={20}
-              textAnchor="end"
-              fontSize={13}
-              fontWeight={700}
-              fill="#334155"
-              opacity={0.8}
-            >
-              استان خوزستان
-            </text>
 
           </svg>
 
@@ -1370,22 +1415,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             ))}
           </div>
 
-          <div className="absolute bottom-2 right-2 hidden rounded-lg border border-line bg-surface/95 px-2 py-1.5 shadow-sm sm:block">
-            <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-muted">
-              <span>{mode === "dens" ? "کمتر" : "بدون شکاف"}</span>
-              <span>{mode === "dens" ? "بیشتر" : "شکاف بیشتر"}</span>
-            </div>
-            <div className="flex h-2 w-32 overflow-hidden rounded-full">
-              {(mode === "dens" ? DENS_RAMP : GAP_RAMP).map((c) => (
-                <span key={c} className="flex-1" style={{ background: c }} />
-              ))}
-            </div>
-            <div className="mt-1 text-[10px] leading-4 text-faint">
-              {view.k >= 3.4
-                ? "شبکهٔ ۱ کیلومتری، فقط روی زمین مسکونی"
-                : `فقط داخل محدودهٔ مسکونی (≤${num(data.meta.maskKm, 1)} کم از یک آبادی)`}
-            </div>
-          </div>
+
 
           {hoverPharm ? (
             <div
@@ -1477,6 +1507,17 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               style={{ borderColor: COLORS.pharmacy, background: "#fff" }}
             />
             دارای داروخانه در فید سازمان
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="flex h-2 w-24 overflow-hidden rounded-full">
+              {(mode === "dens" ? DENS_RAMP : GAP_RAMP).map((c) => (
+                <span key={c} className="flex-1" style={{ background: c }} />
+              ))}
+            </span>
+            {mode === "dens" ? "تراکم کم → زیاد" : "شکاف کم → زیاد"}
+            <span className="text-faint">
+              {view.k >= 3.4 ? "· شبکهٔ ۱ کم" : `· فقط مسکونی`}
+            </span>
           </span>
           <span className="flex items-center gap-1">
             <span className="h-2 w-2 rounded-full" style={{ background: COLORS.reference }} />
