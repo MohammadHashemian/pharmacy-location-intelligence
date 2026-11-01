@@ -371,6 +371,34 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Full screen is a different layout, and it was half-empty
+
+`preserveAspectRatio="xMidYMid slice"` crops, so in full screen the visible scene box is
+**wider than the 660×820 viewBox**. The density grid and the satellite tiles were both
+built from `W`/`H`, which meant they covered only the central band of a landscape window
+and the edges looked unloaded — the map «didn't load completely».
+
+Both now take their bounds from `visibleBox()` (screen matrix → scene coordinates), and
+`isFull` is in their dependency lists so a resize recomputes instead of keeping the old
+geometry.
+
+```bash
+python tools/test_map_layers.py --fullscreen
+```
+
+Four full-screen cases, each also re-run after the viewport is resized to 1740×1180
+(full screen on a different monitor is a resize, and that is where stale pixel geometry
+shows up): entered full screen · map fills its container · `slice` cropping · density
+cells render and **span ≥ 90 % of the map width** · streets · markers · labels ·
+imagery covers 100 % with no gaps · layers in order · no page errors.
+
+Measured after the fix at 9× in full screen: grid spans **1,438 of 1,466 px (98 %)**;
+before, the same window would have put it in a ~660 px band (45 %).
+
+The first version of this test proved nothing: it pressed Escape to close the layer
+popover, and the component listens for Escape to *leave* full screen — so every
+assertion ran against the normal layout. The popover is toggled before entering now.
+
 ### Layer test (`tools/test_map_layers.py`)
 
 The map is hand-drawn SVG, so «the streets disappeared» can be four different bugs: the

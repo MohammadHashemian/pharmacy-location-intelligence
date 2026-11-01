@@ -100,6 +100,58 @@ CASES = [
     ("desert-9x",    31.9000, 48.1000,  9.0, False),
 ]
 
+
+FULLSCREEN_PROBE = r"""() => {
+  const svg = document.querySelector('svg');
+  const scene = document.querySelector('g#scene');
+  const vb = svg.viewBox.baseVal;
+  const r = svg.getBoundingClientRect();
+  const cells = [...svg.querySelectorAll('rect')].filter((x) => /^rgb\(/.test(x.getAttribute('fill') || ''));
+  const inside = cells.filter((c) => {
+    const b = c.getBoundingClientRect();
+    return b.x > r.x - 2 && b.x < r.right && b.y > r.y - 2 && b.y < r.bottom;
+  }).length;
+  let cellCover = 0;
+  if (cells.length) {
+    const bs = cells.map((c) => c.getBoundingClientRect());
+    const x0 = Math.min(...bs.map((b) => b.left)), x1 = Math.max(...bs.map((b) => b.right));
+    const y0 = Math.min(...bs.map((b) => b.top)), y1 = Math.max(...bs.map((b) => b.bottom));
+    cellCover = ((Math.min(x1, r.right) - Math.max(x0, r.x)) * (Math.min(y1, r.bottom) - Math.max(y0, r.y)))
+      / (r.width * r.height);
+  }
+  const streetEls = [...svg.querySelectorAll('path')].filter((p) => {
+    const s = (p.getAttribute('stroke') || '').toLowerCase();
+    return s === '#8a9bad' || s.startsWith('#8a9');
+  });
+  const host = svg.parentElement.getBoundingClientRect();
+  const imgs = [...svg.querySelectorAll('image')];
+  const drawn = imgs.map((i) => i.getBoundingClientRect())
+    .filter((b) => b.width > 0 && b.right > r.x && b.left < r.right && b.bottom > r.y && b.top < r.bottom);
+  let covered = 0;
+  if (drawn.length) {
+    const x0 = Math.min(...drawn.map((b) => b.left)), x1 = Math.max(...drawn.map((b) => b.right));
+    const y0 = Math.min(...drawn.map((b) => b.top)), y1 = Math.max(...drawn.map((b) => b.bottom));
+    covered = ((Math.min(x1, r.right) - Math.max(x0, r.x)) * (Math.min(y1, r.bottom) - Math.max(y0, r.y)))
+      / (r.width * r.height);
+  }
+  return {
+    fullscreen: !!document.fullscreenElement,
+    hostW: Math.round(host.width), hostH: Math.round(host.height),
+    tileCover: Math.round(covered * 100) / 100,
+    cellCover: Math.round(cellCover * 100) / 100,
+    svgW: Math.round(r.width), svgH: Math.round(r.height),
+    vw: window.innerWidth, vh: window.innerHeight,
+    aspect: svg.getAttribute('preserveAspectRatio'),
+    viewBox: [vb.width, vb.height],
+    tagged: [...scene.querySelectorAll('[data-layer]')].map((g) => g.getAttribute('data-layer')),
+    cells: cells.length, cellsInView: inside,
+    streets: streetEls.reduce((n, p) => n + ((p.getAttribute('d') || '').match(/M/g) || []).length, 0),
+    tiles: svg.querySelectorAll('image').length,
+    pharm: svg.querySelectorAll('path[fill="#d97706"]').length,
+    labels: [...svg.querySelectorAll('text')].filter((t) => t.textContent.trim()).length,
+  };
+}"""
+
 fails: list[str] = []
 
 
@@ -172,10 +224,85 @@ def run_case(pg, base: str, name: str, lat: float, lon: float, k: float,
     pg.screenshot(path=shot)
 
 
+
+
+def run_fullscreen(pg, base: str, name: str, lat: float, lon: float, k: float,
+                   sat: bool) -> None:
+    """Full screen is a different layout: `slice` crops, the element is resized, and
+    every layer that caches geometry from client pixels has to recompute."""
+    page_url = f"{base}/map?lat={lat}&lon={lon}&k={k}"
+    pg.goto(page_url, wait_until="networkidle", timeout=180_000)
+    pg.reload(wait_until="networkidle")
+    pg.wait_for_selector("g#scene", timeout=120_000)
+    pg.wait_for_timeout(1500)
+
+    # Satellite is toggled BEFORE entering full screen: closing the layer popover with
+    # Escape also exits full screen (the component listens for Escape), which is how
+    # the first version of this test ended up asserting a non-full-screen layout.
+    pg.get_by_text("لایه‌های نقشه").first.click()
+    pg.wait_for_timeout(250)
+    box = pg.get_by_label("تصویر ماهواره‌ای")
+    box.check() if sat else box.uncheck()
+    pg.wait_for_timeout(4500 if sat else 1200)
+    pg.locator("summary", has_text="لایه‌های نقشه").first.click()
+    pg.wait_for_timeout(300)
+
+    pg.locator('button[title*="تمام‌صفحه"]').first.click()
+    pg.wait_for_timeout(3000)
+
+    d = pg.evaluate(FULLSCREEN_PROBE)
+    print(f"[FULLSCREEN {name} k={k} sat={'on' if sat else 'off'}]")
+    check("entered full screen", d["fullscreen"])
+    check("map fills its container", d["svgW"] >= d["hostW"] - 6 and d["svgH"] >= d["hostH"] - 6,
+          f"{d['svgW']}x{d['svgH']} in {d['hostW']}x{d['hostH']}")
+    check("cropping mode is slice", d["aspect"] == "xMidYMid slice", str(d["aspect"]))
+    check("density cells render", d["cells"] > 0, f"{d['cells']} cells")
+    if k >= 1.2:
+        check("cells cover the screen (no unloaded band)", d["cellCover"] >= 0.9,
+              f"grid spans {int(d['cellCover'] * 100)}% of the map · {d['cellsInView']}/{d['cells']} in view")
+    else:
+        # province view uses the ETL 3.3 km cells, which only exist where people live
+        print(f"  note  province grid is settlement-bounded ({int(d['cellCover'] * 100)}% of the map)")
+    if k >= 3.2:
+        check("street layer draws", d["streets"] > 50, f"{d['streets']} polylines")
+    else:
+        print(f"  note  streets start at 3.2x ({d['streets']} polylines here)")
+    check("pharmacy markers render", d["pharm"] > 0, f"{d['pharm']} diamonds")
+    check("labels render", d["labels"] > 0, f"{d['labels']} labels")
+    if sat:
+        check("satellite tiles render", d["tiles"] > 0, f"{d['tiles']} tiles")
+        check("imagery covers the map (no gaps)", d["tileCover"] >= 0.98,
+              f"{int(d['tileCover'] * 100)}% covered")
+    print(f"  layers tagged: {' → '.join(d['tagged'])}")
+
+    os.makedirs(SHOTS, exist_ok=True)
+    pg.screenshot(path=os.path.join(SHOTS, f"fullscreen-{name}-sat{sat}.png"))
+
+    # Full screen on a different screen is a resize, and every layer that caches
+    # geometry from client pixels has to recompute. Same-size full screen proved
+    # nothing about that, which is why the bug the user saw never failed here.
+    pg.set_viewport_size({"width": 1740, "height": 1180})
+    pg.wait_for_timeout(3500)
+    d2 = pg.evaluate(FULLSCREEN_PROBE)
+    print(f"  after resize to {d2['vw']}x{d2['vh']}:")
+    check("still full screen after resize", d2["fullscreen"])
+    check("map refills after resize",
+          d2["svgW"] >= d2["hostW"] - 6 and d2["svgH"] >= d2["hostH"] - 6,
+          f"{d2['svgW']}x{d2['svgH']} in {d2['hostW']}x{d2['hostH']}")
+    check("density cells survive resize", d2["cells"] > 0, f"{d2['cells']} cells")
+    check("streets survive resize", d2["streets"] > 50 or k < 3.2, f"{d2['streets']} polylines")
+    check("markers survive resize", d2["pharm"] > 0, f"{d2['pharm']} diamonds")
+    if sat:
+        check("imagery covers the resized map", d2["tileCover"] >= 0.98,
+              f"{int(d2['tileCover'] * 100)}% covered · {d2['tiles']} tiles")
+    pg.screenshot(path=os.path.join(SHOTS, f"fullscreen-{name}-resized.png"))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", default="http://localhost:3737")
     ap.add_argument("--only", default=None)
+    ap.add_argument("--fullscreen", action="store_true", help="full-screen cases only")
     args = ap.parse_args()
 
     with sync_playwright() as pw:
@@ -183,12 +310,21 @@ def main() -> int:
         pg = br.new_page(viewport={"width": 1500, "height": 1000})
         errs: list[str] = []
         pg.on("pageerror", lambda e: errs.append(str(e)))
-        for name, lat, lon, k, streets in CASES:
-            if args.only and args.only not in name:
-                continue
-            run_case(pg, args.url, name, lat, lon, k, streets, sat=False)
-            if name in ("ahvaz-3x", "ahvaz-12x", "dezful-9x", "province"):
-                run_case(pg, args.url, name, lat, lon, k, streets, sat=True)
+        if args.fullscreen:
+            for name, lat, lon, k, _streets, sat in (
+                ("ahvaz-12x", 31.3200, 48.6690, 12.0, True, False),
+                ("ahvaz-12x", 31.3200, 48.6690, 12.0, True, True),
+                ("dezful-9x", 32.3810, 48.4050, 9.0, True, True),
+                ("province", 31.3189, 48.6842, 1.0, False, True),
+            ):
+                run_fullscreen(pg, args.url, name, lat, lon, k, sat)
+        else:
+            for name, lat, lon, k, streets in CASES:
+                if args.only and args.only not in name:
+                    continue
+                run_case(pg, args.url, name, lat, lon, k, streets, sat=False)
+                if name in ("ahvaz-3x", "ahvaz-12x", "dezful-9x", "province"):
+                    run_case(pg, args.url, name, lat, lon, k, streets, sat=True)
         check("no page errors", not errs, "; ".join(errs[:2]))
         br.close()
 

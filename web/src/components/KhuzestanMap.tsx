@@ -1278,12 +1278,16 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
   const fineCells = useMemo(() => {
     if (settled.k < 1.2) return null;
-    const x0 = -settled.tx / settled.k;
-    const y0 = -settled.ty / settled.k;
-    const w = W / settled.k;
-    const h = H / settled.k;
+    /* The screen's own box, not the viewBox: in full screen the map is cropped with
+       `slice`, so a grid built from W x H covered only the middle of the window and
+       the edges looked unloaded. */
+    const vb = visibleBox();
+    const x0 = (vb.x0 - settled.tx) / settled.k;
+    const y0 = (vb.y0 - settled.ty) / settled.k;
+    const x1 = (vb.x1 - settled.tx) / settled.k;
+    const y1 = (vb.y1 - settled.ty) / settled.k;
     const [latTop, lonLeft] = scene.inv(x0, y0);
-    const [latBot, lonRight] = scene.inv(x0 + w, y0 + h);
+    const [latBot, lonRight] = scene.inv(x1, y1);
     const latLo = Math.min(latTop, latBot);
     const latHi = Math.max(latTop, latBot);
     const lonLo = Math.min(lonLeft, lonRight);
@@ -1451,7 +1455,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       ? Math.max(1e-6, sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))])
       : 1;
     return { cells: out, max: maxV, cap, stepKm, dLat, dLon };
-  }, [settled, scene, settlements, mode, targetPerPharm, supply, popCells, popProvince]);
+  }, [settled, scene, settlements, mode, targetPerPharm, supply, popCells, popProvince, isFull]);
 
   /* Satellite base. Hand-rolled like the rest of the map: no map library, so the
      visible scene box is inverted to lat/lon, the Esri World Imagery zoom that puts
@@ -1464,8 +1468,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const satTiles = useMemo(() => {
     if (!layers.sat) return null;
     const k = view.k;
-    const [latN, lonW] = scene.inv(-view.tx / k, -view.ty / k);
-    const [latS, lonE] = scene.inv((W - view.tx) / k, (H - view.ty) / k);
+    const vb = visibleBox();
+    const [latN, lonW] = scene.inv((vb.x0 - view.tx) / k, (vb.y0 - view.ty) / k);
+    const [latS, lonE] = scene.inv((vb.x1 - view.tx) / k, (vb.y1 - view.ty) / k);
     const lonSpan = Math.max(1e-6, Math.abs(lonE - lonW));
     /* Pick the zoom whose native resolution matches the screen, not "a few tiles
        across": one level short upsampled the image ~4x and the city read as flat
@@ -1500,7 +1505,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       }
     }
     return { z, tiles: out };
-  }, [layers.sat, view.k, view.tx, view.ty, scene]);
+  }, [layers.sat, view.k, view.tx, view.ty, scene, isFull]);
 
   /* Roads: culled to the viewport and to the class the zoom level needs, then
      concatenated into two paths — 8k <path> nodes would choke the renderer. */
