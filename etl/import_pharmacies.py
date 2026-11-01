@@ -481,7 +481,9 @@ def main() -> int:
                     break
                 time.sleep(args.page_pause)
             raw_points.extend(here)
-            remember(name, here)
+            # the cache key is the CENTRE: writing it under the city name meant every
+            # grid cell overwrote the previous one, so a killed run resumed from zero
+            remember(ck, here)
             if i % 10 == 0:
                 print(f"  [{i}/{len(centres)}] {name}: points so far {len(raw_points)}")
             time.sleep(args.pause)
