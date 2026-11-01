@@ -328,6 +328,31 @@ and never double-counted:
 Every settlement tooltip/card shows the split — جمعیت, داروخانه (FDA), نقشهشده,
 بدون موقعیت — and the header chip reads «۸۹۴ داروخانه در فید سازمان · ۴۱۹ روی نقشه».
 
+### Administrative attribution is geometric, not by name (`etl/fix_admin_attribution.py`)
+
+The map printed «کوی زیباشهر دزفول» at 31.3056, 48.7000 — inside اهواز, 130 km from
+دزفول. It was not one bad label: **283 settlements sat more than 40 km from their own
+county's centre**, because the admin parents had been attached by *name* across the
+census and OSM layers, and village names repeat in every county.
+
+Attribution is now derived from geometry. `khuzestan_bakhsh_areas.geojson` is the only
+complete polygon set, so a polygon's county is the **modal county of the settlements
+inside it** — 8 % of labels are wrong, so one bad row cannot move the answer. Keyed by
+`osm_id`, not by name: 31 counties each have a «بخش مرکزی», and a name-keyed vote
+merged four cities into one district and sent اهواز to ایذه.
+
+```bash
+python etl/fix_admin_attribution.py --check          # boundary answers, no writes
+python etl/fix_admin_attribution.py                  # what would change
+python etl/fix_admin_attribution.py --apply --fix-names
+python etl/build_map_layer.py                        # rebuild the served layer
+```
+
+Result: **2,611 areas re-attributed**, 1 name trimmed. A name is only trimmed when it
+starts with a neighbourhood word (کوی/شهرک/محله/…) *and* ends with a county it is not
+in — «بیت باوی» and «کشت و صنعت کارون» are real names whose last word happens to be a
+county, and trimming them would destroy them.
+
 ### Satellite base (`layers.sat`)
 
 The map is hand-rolled SVG, so the imagery is too: the visible scene box is inverted
