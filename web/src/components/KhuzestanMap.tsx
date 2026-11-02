@@ -1145,6 +1145,17 @@ export function KhuzestanMap({ data }: { data: MapData }) {
    *  refresh. The numbered site badges come from `etl/rank_sites.py` (~8 s), so the page
    *  polls `rankAt` and refreshes once when it moves. Without this a new pharmacy changed
    *  the table but left the recommendations stale, which is what was reported. */
+  /** km between two points — used by the candidate popup for its rival list. */
+  const havKm = (alat: number, alon: number, blat: number, blon: number) => {
+    const R = 6371.0088;
+    const rad = (d: number) => (d * Math.PI) / 180;
+    const dp = rad(blat - alat);
+    const dl = rad(blon - alon);
+    const h =
+      Math.sin(dp / 2) ** 2 + Math.cos(rad(alat)) * Math.cos(rad(blat)) * Math.sin(dl / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  };
+
   const refreshSoon = () => {
     router.refresh();
     let tries = 0;
@@ -1398,13 +1409,32 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     if (onlyUnnamed) return null;
     if (!layers.sites || !data.sites.length) return null;
     return (
-      <g pointerEvents="none">
+      <g>
         {data.sites.map((site) => {
           const [x, y] = scene.proj(site.lat, site.lon);
           const hot = site.score >= 0.8;
           const fill = hot ? "#16a34a" : site.score >= 0.6 ? "#0d9488" : "#f59e0b";
+          const on = selSite === site.rank;
           return (
-            <g key={site.rank} data-lat={site.lat} data-lon={site.lon} data-rank={site.rank}>
+            <g
+              key={site.rank}
+              data-lat={site.lat}
+              data-lon={site.lon}
+              data-rank={site.rank}
+              data-selected={on ? "1" : undefined}
+              className="cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelSite(site.rank);
+                setSelPharm(null);
+                setSelMed(null);
+              }}
+            >
+              {/* a 5.4 px badge is not a click target: an invisible disc makes it one */}
+              <circle cx={x} cy={y} r={11 / view.k} fill="transparent" />
+              {on ? (
+                <circle cx={x} cy={y} r={12 / view.k} fill="none" stroke={fill} strokeWidth={2 / view.k} />
+              ) : null}
               <circle cx={x} cy={y} r={9 / view.k} fill={fill} opacity={0.22} />
               <circle cx={x} cy={y} r={5.4 / view.k} fill={fill} stroke="#fff" strokeWidth={1.4 / view.k} />
               <text
@@ -1425,7 +1455,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         })}
       </g>
     );
-  }, [layers.sites, data.sites, scene, view.k, onlyUnnamed]);
+  }, [layers.sites, data.sites, scene, view.k, onlyUnnamed, selSite]);
 
   const connectorPts = useMemo(() => {
     if (!connectors?.length) return null;
@@ -2643,8 +2673,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           {layers.sites && data.sites.length ? (
             <details className="absolute bottom-2 left-2 z-20 w-[246px] max-w-[80vw] rounded-xl border border-line bg-surface/97 text-[10.5px] shadow-lg">
               <summary className="cursor-pointer list-none px-2 py-1.5 font-medium text-ink">
-                پیشنهادهای مکانی · {data.sites.length.toLocaleString("fa-IR")} مورد
+                پیشنهاد در سطح بلوک جمعیتی · {data.sites.length.toLocaleString("fa-IR")} مورد
               </summary>
+              <p className="border-t border-line px-2 py-1 text-[9.5px] leading-4 text-faint">
+                امتیاز ۰ تا ۱ از جمعیت، شمارش داروخانه، درمانگران و دسترسی. با «کمبود
+                داروخانه» در جدول آبادی‌ها یکی نیست — آن یکی در واحد «تعداد داروخانه» است.
+              </p>
               <ol className="max-h-52 overflow-auto border-t border-line px-1 py-1">
                 {data.sites.slice(0, 12).map((site) => (
                   <li key={site.rank}>
@@ -2703,6 +2737,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 <div className="mt-0.5 text-[10.5px] text-muted">
                   {site.county ?? ""} · امتیاز {site.score.toFixed(2)}
                 </div>
+                {/* the ranking already writes this sentence — it was never shown */}
+                <p className="mt-1 rounded bg-surface-2 px-1.5 py-1 text-[10px] leading-4 text-ink-soft">
+                  {site.reason}
+                </p>
                 <ul className="mt-1 space-y-0.5 text-[10.5px] text-ink-soft">
                   <li>جمعیت در ۱٫۲ کم: <b className="tnum">{Math.round(site.demand).toLocaleString("fa-IR")}</b></li>
                   <li>داروخانهٔ ثبت‌شده: <b className="tnum">{site.supplyMapped.toFixed(0)}</b> · مجوز ثبت‌نشده: <b className="tnum">{site.supplyExpected.toFixed(0)}</b></li>
@@ -2710,6 +2748,34 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                   <li>نفر به ازای هر داروخانه: <b className="tnum">{Math.round(site.gap).toLocaleString("fa-IR")}</b></li>
                   <li>فاصلهٔ جاده‌ای از اهواز: <b className="tnum">{Math.round(site.roadKm).toLocaleString("fa-IR")}</b> کم</li>
                 </ul>
+                {(() => {
+                  const rivals = data.pharmacies
+                    .map((p) => ({ p, d: havKm(site.lat, site.lon, p.lat, p.lon) }))
+                    .filter((x) => x.d <= 1.2)
+                    .sort((a, b) => a.d - b.d);
+                  return (
+                    <div className="mt-1.5 rounded bg-surface-2 px-1.5 py-1">
+                      <div className="flex items-center justify-between text-[10px] text-muted">
+                        <b className="text-ink">رقبا در ۱٫۲ کیلومتر</b>
+                        <span className="tnum">{rivals.length.toLocaleString("fa-IR")}</span>
+                      </div>
+                      {rivals.length ? (
+                        <ul className="mt-0.5 space-y-0.5 text-[9.5px] text-muted">
+                          {rivals.slice(0, 3).map((r) => (
+                            <li key={r.p.id} className="flex items-center justify-between gap-1">
+                              <span className="truncate">{r.p.name}</span>
+                              <span className="tnum shrink-0 text-faint">
+                                {r.d.toLocaleString("fa-IR", { maximumFractionDigits: 2 })} کم
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-0.5 text-[9.5px] text-good">بدون داروخانهٔ نقشه‌شده</p>
+                      )}
+                    </div>
+                  );
+                })()}
                 <div className="mt-1.5 flex gap-1.5">
                   <button
                     type="button"
@@ -3343,7 +3409,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[13px] font-semibold text-ink">
-              گزینه‌های تأسیس درون شعاع {group(radius)} کیلومتری
+              گزینه در سطح آبادی · شعاع {group(radius)} کیلومتر · معیار: کمبود داروخانه
             </span>
             <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[10.5px] text-muted">
               {group(candidates.length)} مورد
@@ -3430,10 +3496,19 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 <th className="px-1 py-1.5 text-right font-medium">شهرستان</th>
                 <th className="px-1 py-1.5 text-right font-medium">بخش / دهستان</th>
                 <th className="px-1 py-1.5 text-left font-medium">فاصله</th>
-                <th className="px-1 py-1.5 text-left font-medium">جمعیت</th>
-                <th className="px-1 py-1.5 text-left font-medium">داروخانه</th>
+                <th className="px-1 py-1.5 text-left font-medium" title="جمعیت سکونتگاه، با سال و منبع در tooltip">
+                  جمعیت
+                </th>
+                <th className="px-1 py-1.5 text-left font-medium" title="منبع شمارش: فید سازمان، یا نقشه‌شده/دست‌افزوده">
+                  داروخانه
+                </th>
                 <th className="px-1 py-1.5 text-left font-medium">نفر/داروخانه</th>
-                <th className="px-1 py-1.5 text-left font-medium">شکاف</th>
+                <th
+                  className="px-1 py-1.5 text-left font-medium"
+                  title="کمبود = جمعیت ÷ هدف − داروخانهٔ شمارش‌شده؛ عدد مثبت یعنی به‌اندازهٔ این تعداد داروخانه کم دارد"
+                >
+                  کمبود داروخانه
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -3456,8 +3531,41 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                         .join(" / ") || "—"}
                     </td>
                     <td className="tnum px-1 py-1 text-left">{num(s.dist, 1)}</td>
-                    <td className="tnum px-1 py-1 text-left">{group(s.pop)}</td>
-                    <td className="tnum px-1 py-1 text-left">{group(s.ph)}</td>
+                    <td
+                      className="tnum px-1 py-1 text-left"
+                      title={
+                        s.pop == null
+                          ? "جمعیت نامعلوم"
+                          : `${s.popSource ?? "نامعلوم"}${s.popYear ? ` · ${s.popYear}` : ""}`
+                      }
+                    >
+                      {group(s.pop)}
+                      {s.popYear ? (
+                        <span className="mr-1 text-[9px] text-faint">{s.popYear}</span>
+                      ) : null}
+                    </td>
+                    <td className="tnum px-1 py-1 text-left">
+                      {group(s.ph)}
+                      {/* which source won the max(): the reader must be able to tell */}
+                      <span
+                        className={`mr-1 rounded px-1 text-[8.5px] ${
+                          s.inFda
+                            ? "bg-brand-soft text-brand-ink"
+                            : s.mapped > 0
+                              ? "bg-warn-soft text-warn"
+                              : "bg-surface-2 text-faint"
+                        }`}
+                        title={
+                          s.inFda
+                            ? "شمارش از فید سازمان غذا و دارو"
+                            : s.mapped > 0
+                              ? "در فید سازمان نیست؛ شمارش از نقاط نقشه‌شده و دست‌افزوده"
+                              : "هیچ داروخانه‌ای ثبت نشده"
+                        }
+                      >
+                        {s.inFda ? "فید" : s.mapped > 0 ? "نقشه" : "—"}
+                      </span>
+                    </td>
                     <td className="tnum px-1 py-1 text-left">
                       {s.ph ? group(Math.round((s.pop ?? 0) / s.ph)) : "—"}
                     </td>
