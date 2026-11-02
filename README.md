@@ -371,6 +371,32 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Village lanes: the other half of the street network (`etl/build_rural_streets.py`)
+
+Half of OSM's residential ways in خوزستان lie outside every city disc, so no file contained
+them and whole districts rendered as bare imagery. They are now shipped **per county** (and
+per 0.25° tile inside the big ones), loaded only when the view needs them:
+
+```bash
+python etl/build_rural_streets.py          # → web/public/geo/rural_<slug>.json + index
+```
+
+**68,470 ways · 9.4 MB total · largest single file 2.6 MB · 78 index entries**, built from
+the tiles we already had, simplified to ~50 m. Assignment is by the **nearest settlement's
+county**, not point-in-polygon over 31 shapes: cheaper, and a lane between two counties
+belongs to the one whose village it serves.
+
+Two mistakes worth recording, both caught by counting:
+
+* a 3-cell county lookup dropped **38,952 ways (37 % of the province)** — the plains have
+  stretches more than 27 km from any settlement. The search now widens to 1.2°.
+* ways already in a city file are skipped by their endpoint signature, so the county layer
+  and the city layer never paint the same line twice.
+
+Measured in the rural corridor between ملاثانی and اهواز: village lanes and connecting
+tracks now link nearly every settlement (previously only the main roads). Still patchy —
+OSM is thin there, and single connector lines are not street grids.
+
 ### Why a town showed no streets (three different answers)
 
 «ملاثانی has streets, the district next to it has none» — measured, and it was three

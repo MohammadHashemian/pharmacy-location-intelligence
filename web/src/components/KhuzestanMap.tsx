@@ -490,12 +490,17 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   /* Streets for the city the reader is zoomed into (one at a time, fetched on
      demand from /geo/streets_<slug>.json). */
   const streetCache = useRef<Map<string, { c: string; p: [number, number][] }[]>>(new Map());
+  const ruralCache = useRef<Map<string, { c: string; p: [number, number][] }[]>>(new Map());
+  const ruralIndex = useRef<{ county: string; slug: string; lat: number; lon: number; r_km: number }[] | null>(null);
   const [streetCity, setStreetCity] = useState<string | null>(null);
   /* tertiary / unclassified ways for the whole province: the roads *between* towns,
      which the per-city files never held and which made a small town look stranded. */
   const [connectors, setConnectors] = useState<{ c: string; p: [number, number][] }[] | null>(
     null,
   );
+  /* Village lanes and outskirts, per county, loaded only for counties in view — this is
+     the half of OSM's residential ways that no city disc ever contained. */
+  const [rural, setRural] = useState<{ c: string; p: [number, number][] }[]>([]);
   const [streetLines, setStreetLines] = useState<{ c: string; p: [number, number][] }[]>([]);
   const streetIndex = useRef<{ city: string; slug: string; lat: number; lon: number; r_km: number }[] | null>(null);
 
@@ -548,6 +553,59 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       alive = false;
     };
   }, [layers.streets, connectors, settled.k]);
+
+  useEffect(() => {
+    if (!layers.streets || settled.k < 3.2) return;
+    let alive = true;
+    (async () => {
+      if (!ruralIndex.current) {
+        const idx = await fetch("/geo/rural_index.json")
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => []);
+        ruralIndex.current = Array.isArray(idx) ? idx : [];
+      }
+      const idx = ruralIndex.current ?? [];
+      if (!idx.length) return;
+      const cx0 = -settled.tx / settled.k;
+      const cy0 = -settled.ty / settled.k;
+      const [latA, lonA] = scene.inv(cx0, cy0);
+      const [latB, lonB] = scene.inv(cx0 + W / settled.k, cy0 + H / settled.k);
+      const latMid = (latA + latB) / 2;
+      const lonMid = (lonA + lonB) / 2;
+      const halfKm = Math.max(Math.abs(latB - latA) * 55.5, Math.abs(lonB - lonA) * 47.5);
+      const wanted = idx
+        .map((c: { county: string; slug: string; lat: number; lon: number; r_km: number }) => ({
+          c, d: Math.hypot((c.lat - latMid) * 111, (c.lon - lonMid) * 95),
+        }))
+        .filter((x) => x.d <= x.c.r_km + halfKm * 1.2)
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 3)
+        .map((x) => x.c);
+      const parts: { c: string; p: [number, number][] }[] = [];
+      for (const county of wanted) {
+        const hit = ruralCache.current.get(county.slug);
+        if (hit) {
+          parts.push(...hit);
+          continue;
+        }
+        const d = await fetch(`/geo/${county.slug}.json`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+        const feats = (d?.features ?? [])
+          .map((f: { properties?: { c?: string }; geometry?: { coordinates?: [number, number][] } }) => ({
+            c: f.properties?.c ?? "residential",
+            p: (f.geometry?.coordinates ?? []).map(([lo, la]) => [la, lo] as [number, number]),
+          }))
+          .filter((f: { p: [number, number][] }) => f.p.length >= 2);
+        ruralCache.current.set(county.slug, feats);
+        parts.push(...feats);
+      }
+      if (alive) setRural(parts);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [layers.streets, settled, scene]);
 
   /* Streets: one city at a time, whichever the view is centred on, fetched from
      2.5x. It used to start at 5x and draw at 4.5x, which left a band where the map
@@ -1327,9 +1385,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   }, [layers.streets, connectorPts, view.k, view.tx, view.ty]);
 
   const streetLayer = useMemo(() => {
-    if (!layers.streets || !streetLines.length || view.k < 3.2) return null;
+    if (!layers.streets || view.k < 3.2) return null;
+    if (!streetLines.length && !rural.length) return null;
     const byClass = new Map<string, string[]>();
-    for (const seg of streetLines) {
+    for (const seg of [...streetLines, ...rural]) {
       const pts = seg.p.map(([la, lo]) => scene.proj(la, lo));
       if (pts.length < 2) continue;
       let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
@@ -1371,7 +1430,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         ))}
       </g>
     );
-  }, [layers.streets, streetLines, scene, view.k, layers.sat]);
+  }, [layers.streets, streetLines, rural, scene, view.k, layers.sat]);
 
   const edgeLayer = useMemo(
     () => (

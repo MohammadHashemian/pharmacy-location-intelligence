@@ -51,9 +51,11 @@ PROBE = r"""() => {
     return { tag, kind, imgs, rects, paths, texts, fill, stroke, op: el.getAttribute('opacity') };
   });
 
+  /* the street body is #8a9bad on the vector base and #f8fafc over imagery —
+     it flips so a grey line is not invisible on a grey photograph */
   const streetEls = [...svg.querySelectorAll('path')].filter((p) => {
     const s = (p.getAttribute('stroke') || '').toLowerCase();
-    return s === '#8a9bad' || s.startsWith('#8a9');
+    return s === '#8a9bad' || s.startsWith('#8a9') || s === '#f8fafc';
   });
   const streetPaths = streetEls.length;
   const streetSegs = streetEls.reduce((n, p) => n + ((p.getAttribute('d') || '').match(/M/g) || []).length, 0);
@@ -125,9 +127,11 @@ FULLSCREEN_PROBE = r"""() => {
     cellCover = ((Math.min(x1, r.right) - Math.max(x0, r.x)) * (Math.min(y1, r.bottom) - Math.max(y0, r.y)))
       / (r.width * r.height);
   }
+  /* the street body is #8a9bad on the vector base and #f8fafc over imagery —
+     it flips so a grey line is not invisible on a grey photograph */
   const streetEls = [...svg.querySelectorAll('path')].filter((p) => {
     const s = (p.getAttribute('stroke') || '').toLowerCase();
-    return s === '#8a9bad' || s.startsWith('#8a9');
+    return s === '#8a9bad' || s.startsWith('#8a9') || s === '#f8fafc';
   });
   const host = svg.parentElement.getBoundingClientRect();
   const imgs = [...svg.querySelectorAll('image')];
