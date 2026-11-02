@@ -694,6 +694,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const [addKind, setAddKind] = useState<string>("pharmacy");
   /** Show only the pharmacies nobody named — the ones that still need a human look. */
   const [onlyUnnamed, setOnlyUnnamed] = useState(false);
+  const rankAt = useRef<string | null>(null);
   const unnamedCount = data.pharmacies.filter((p) => p.unnamed).length;
   const [addName, setAddName] = useState("");
   const [addAddr, setAddAddr] = useState("");
@@ -1136,6 +1137,31 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const flyLatLon = (lat: number, lon: number, k = 15) => {
     const [x, y] = scene.proj(lat, lon);
     commit(k, W / 2 - x * k, H / 2 - y * k);
+  };
+
+  /** Refresh now, then again when the background re-rank has finished.
+   *
+   *  The gap table, density and ratio are live views — they are correct on the first
+   *  refresh. The numbered site badges come from `etl/rank_sites.py` (~8 s), so the page
+   *  polls `rankAt` and refreshes once when it moves. Without this a new pharmacy changed
+   *  the table but left the recommendations stale, which is what was reported. */
+  const refreshSoon = () => {
+    router.refresh();
+    let tries = 0;
+    const tick = async () => {
+      tries += 1;
+      const j = (await fetch("/api/pharmacies")
+        .then((r) => r.json())
+        .catch(() => null)) as { rankAt?: string | null } | null;
+      const at = j?.rankAt ?? null;
+      if (at && at !== rankAt.current) {
+        rankAt.current = at;
+        router.refresh();
+        return;
+      }
+      if (tries < 12) window.setTimeout(tick, 2000);
+    };
+    window.setTimeout(tick, 2000);
   };
 
   const flyTo = (s: MapSettlement, k = 6) => {
@@ -2789,7 +2815,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                         setAddPhone("");
                         /* keep the pin and the form: clearing them unmounted the success
                            message in the same tick, so the user saw nothing happen */
-                        router.refresh();
+                        refreshSoon();
                       } else {
                         setAddMsg({ ok: false, text: j.error ?? "ثبت نشد" });
                       }
@@ -3054,7 +3080,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           medical={selMed !== null ? data.medical[selMed] : null}
           pharmacies={data.pharmacies}
           medicals={data.medical}
-          onChanged={() => router.refresh()}
+          onChanged={refreshSoon}
           onClose={() => {
             setSelPharm(null);
             setSelMed(null);

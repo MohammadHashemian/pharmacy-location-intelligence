@@ -15,8 +15,32 @@
  * would give it, so it counts towards density, the ring table and the
  * per-pharmacy ratio exactly like an imported point.
  */
+import { spawn } from "node:child_process";
+import path from "node:path";
 import { NextResponse } from "next/server";
 import { all, one, run } from "@/lib/db";
+
+/* Hand-added supply is part of the ranking. The gap table, the density wash and the ratio
+   read live views and move on reload; the numbered site badges are a Python build
+   (`etl/rank_sites.py`, ~8 s), so a manual change re-runs it in the background and the page
+   polls until `generated_at` moves. */
+let lastRank = 0;
+function rerank(): void {
+  if (Date.now() - lastRank < 30_000) return;      // a burst of edits is one rebuild
+  lastRank = Date.now();
+  const root = path.join(process.cwd(), "..");
+  try {
+    const child = spawn("python", ["etl/rank_sites.py", "--min-pop", "4000"], {
+      cwd: root,
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+  } catch {
+    lastRank = 0;                                   // python missing: try again next save
+  }
+}
 
 const KHZ = { latMin: 29.4, latMax: 33.6, lonMin: 47.3, lonMax: 51.1 };
 const KINDS = ["pharmacy", "clinic", "doctor", "dentist", "hospital", "lab"] as const;
@@ -100,7 +124,8 @@ export async function GET() {
     `SELECT id, kind, name, lat, lon, address, phone, note, created_at AS createdAt
        FROM manual_place ORDER BY id DESC`,
   );
-  return NextResponse.json({ places: rows });
+  const rank = one<{ at: string | null }>("SELECT MAX(generated_at) AS at FROM site_candidate");
+  return NextResponse.json({ places: rows, rankAt: rank?.at ?? null });
 }
 
 /* Editing a hand-added pin. Only manual rows can arrive here: everything else is rebuilt
@@ -143,6 +168,7 @@ export async function PATCH(req: Request) {
 
   run("UPDATE manual_place SET kind = ?, name = ?, address = ?, phone = ?, note = ? WHERE id = ?",
       [kind, name, address, phone, note, id]);
+  if (kind !== existing.kind) rerank();
   const row = one("SELECT id, kind, name, address, phone, note FROM manual_place WHERE id = ?", [id]);
   return NextResponse.json({ ok: true, id, kindFa: KIND_FA[kind], place: row });
 }
@@ -154,6 +180,7 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "شناسه نامعتبر است" }, { status: 400 });
   }
   run("DELETE FROM manual_place WHERE id = ?", [id]);
+  rerank();
   return NextResponse.json({ ok: true, id });
 }
 
@@ -229,6 +256,7 @@ export async function POST(req: Request) {
      Math.round(near.km * 100) / 100, near.s.county,
      new Date().toISOString().replace(/\.\d{3}Z$/, "Z")],
   );
+  rerank();
   const row = one<{ id: number }>("SELECT last_insert_rowid() AS id");
   return NextResponse.json({
     ok: true,

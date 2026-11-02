@@ -371,6 +371,38 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### A manual pharmacy moves the analysis (`tools/test_live_analytics.py`)
+
+Reported: two pharmacies added in عین دو, and the «بیشترین شکاف» table did not move. Two
+separate reasons, both found by reading the SQL rather than the screen:
+
+1. **The views never saw manual pins.** `v_map_pharmacy_mapped` counted `map_pharmacy` only,
+   so the gap, the density wash and the per-capita ratio were blind to everything a person
+   added. It now unions `manual_place`, and a new `v_map_pharmacy_assigned` counts by
+   `nearest_area_id` (no 3 km spill — a pin in the next village must not pay for this one).
+2. **The gap used the FDA register alone.** `ph` was `pharmacy_total`, so a settlement with
+   no FDA row had a gap no matter how many pharmacies stood in it. Supply is now
+   `max(FDA total, assigned)` — the two count the same shops by different methods, and a
+   hand-added pin exists precisely because the register missed it.
+
+`etl/rank_sites.py` had the same blind spot for the numbered badges; it now unions
+`manual_place` too. Since it is an 8 s Python build, `POST/PATCH/DELETE /api/pharmacies`
+re-runs it in the background (30 s debounce) and the page polls `rankAt` until the new build
+lands, then refreshes — the gap table updates immediately, the badges a few seconds later.
+
+The test asserts the whole loop against the real database and the real page:
+
+```
+before ....... mapped 3 · gap 0.33
+add pin ...... mapped 4 · gap -0.67   PASS  live view counts the new pin
+              re-rank 07:14:32 → 07:14:52   PASS
+page row ..... «عین دو | … | ۱۸٬۰۰۰ | ۴ | ۴٬۵۰۰ | −۰٫۷»   PASS
+delete ....... mapped 3 · gap 0.33   PASS  deleting restores the gap
+```
+
+`python tools/test_live_analytics.py` — exit 0 only when every assertion holds; it removes
+its own leftovers first, so interrupted runs cannot poison the baseline.
+
 ### A hand-added pharmacy is a pin, not a diamond
 
 Every fetched pharmacy is an orange diamond. A pharmacy **you** placed is an **indigo

@@ -133,12 +133,35 @@ CREATE INDEX IF NOT EXISTS ix_map_pharmacy_area ON map_pharmacy (nearest_area_id
 -- one row per settlement: how many mapped pharmacies sit within 2 km of it
 DROP VIEW IF EXISTS v_map_pharmacy_mapped;
 CREATE VIEW v_map_pharmacy_mapped AS
-SELECT nearest_area_id AS area_id,
-       COUNT(*)       AS n_mapped,
+/* Both sources, deliberately: a pharmacy somebody pinned by hand is supply, and the gap
+   table, the density wash and the per-capita ratio must move the moment it is added.
+   Counting only map_pharmacy made hand-added pins invisible to every analytic. */
+WITH pts AS (
+  SELECT nearest_area_id AS area_id, nearest_km FROM map_pharmacy
+   WHERE nearest_area_id IS NOT NULL AND nearest_km <= 3.0
+  UNION ALL
+  SELECT nearest_area_id, nearest_km FROM manual_place
+   WHERE kind = 'pharmacy' AND nearest_area_id IS NOT NULL AND nearest_km <= 3.0
+)
+SELECT area_id,
+       COUNT(*)        AS n_mapped,
        MIN(nearest_km) AS nearest_km
-FROM map_pharmacy
-WHERE nearest_area_id IS NOT NULL AND nearest_km <= 3.0
-GROUP BY nearest_area_id;
+FROM pts
+GROUP BY area_id;
+
+-- M4b. Pharmacies *assigned* to a settlement, both sources, no radius spill.
+--     `v_map_pharmacy_mapped` counts everything within 3 km, which is the right sample for
+--     display but the wrong supply figure for a gap: a pin in the next village would pay for
+--     this one. A hand-added pin carries nearest_area_id, so it lands here on insert.
+DROP VIEW IF EXISTS v_map_pharmacy_assigned;
+CREATE VIEW v_map_pharmacy_assigned AS
+WITH pts AS (
+  SELECT nearest_area_id AS area_id FROM map_pharmacy WHERE nearest_area_id IS NOT NULL
+  UNION ALL
+  SELECT nearest_area_id FROM manual_place
+   WHERE kind = 'pharmacy' AND nearest_area_id IS NOT NULL
+)
+SELECT area_id, COUNT(*) AS n_assigned FROM pts GROUP BY area_id;
 
 -- ---------------------------------------------------------------------------
 -- M5. Live pharmacy aggregate per admin area (FDA layer only).
@@ -176,6 +199,7 @@ SELECT a.area_id,
        COALESCE(ph.pharmacy_real, 0) + COALESCE(ph.pharmacy_legal, 0) AS pharmacy_total,
        COALESCE(ph.n_fda_rows, 0)     AS n_fda_rows,
        COALESCE(mp.n_mapped, 0)       AS pharmacy_mapped,
+       COALESCE(asg.n_assigned, 0)    AS pharmacy_assigned,
        p.straight_km,
        p.road_km,
        p.road_minutes,
@@ -188,6 +212,7 @@ FROM v_admin_area_current a
 LEFT JOIN map_point p            ON p.area_id = a.area_id
 LEFT JOIN v_map_pharmacy ph      ON ph.area_id = a.area_id
 LEFT JOIN v_map_pharmacy_mapped mp ON mp.area_id = a.area_id
+LEFT JOIN v_map_pharmacy_assigned asg ON asg.area_id = a.area_id
 WHERE a.kind IN ('city', 'village');
 
 

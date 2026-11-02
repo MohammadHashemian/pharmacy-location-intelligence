@@ -112,7 +112,12 @@ def main() -> int:
     print(f"demand cells: {len(demand):,}")
 
     pharm = Bucket()
-    for r in c.execute("SELECT lat, lon, name FROM map_pharmacy"):
+    # Supply is both sources: a pharmacy a user pinned is competition for the next one,
+    # exactly like an imported pin. Counting only map_pharmacy made hand-added shops
+    # invisible to the ranking while the gap table already saw them.
+    for r in c.execute("""SELECT lat, lon, name FROM map_pharmacy
+                          UNION ALL
+                          SELECT lat, lon, name FROM manual_place WHERE kind = 'pharmacy'"""):
         if "دامپزشک" in (r["name"] or "") or "دامی" in (r["name"] or ""):
             continue
         pharm.add(r["lat"], r["lon"], 1)

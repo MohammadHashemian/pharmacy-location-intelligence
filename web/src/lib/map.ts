@@ -30,7 +30,10 @@ export type MapSettlement = {
   popSource: string | null;
   lat: number;
   lon: number;
-  /** Real + legal pharmacies of the linked FDA row(s): 0 means "not in the feed". */
+  /** Supply we can actually count: the FDA register, or the pharmacies mapped or added by
+   *  hand when the register has none for this settlement. Taking the larger is deliberate —
+   *  the two count the same shops by different methods, and a hand-added pin exists exactly
+   *  because the register missed it. */
   ph: number;
   phReal: number;
   phLegal: number;
@@ -320,6 +323,7 @@ export function loadMapData(): MapData {
     pharmacy_total: number;
     n_fda_rows: number;
     pharmacy_mapped: number;
+    pharmacy_assigned: number;
     straight_km: number;
     net_km: number | null;
     road_km: number | null;
@@ -332,6 +336,7 @@ export function loadMapData(): MapData {
     SELECT area_id, kind, name, county, bakhsh, dehestan, population,
            population_year_sh, population_source, lat, lon,
            pharmacy_real, pharmacy_legal, pharmacy_total, n_fda_rows, pharmacy_mapped,
+           pharmacy_assigned,
            straight_km, net_km, road_km, road_minutes, est_km, dist_source,
            ring_km, deg
     FROM v_map_settlement
@@ -356,7 +361,7 @@ export function loadMapData(): MapData {
     popSource: r.population_source,
     lat: r4(r.lat),
     lon: r4(r.lon),
-    ph: r.pharmacy_total,
+    ph: Math.max(r.pharmacy_total, r.pharmacy_assigned),
     phReal: r.pharmacy_real,
     phLegal: r.pharmacy_legal,
     mapped: r.pharmacy_mapped,
