@@ -76,6 +76,9 @@ export async function POST(req: Request) {
       [benchmark, benchmark]);
   run("UPDATE pharmacy_catchment SET capacity = ?, remaining = ? - catchment, saturated = catchment > ?",
       [benchmark, benchmark, benchmark]);
+  /* the opportunity surface uses the same benchmark; recomputing it here is one UPDATE,
+     not another grid pass */
+  run("UPDATE opportunity_cell SET gap = CAST(ROUND(demand - ? * supply) AS INTEGER)", [benchmark]);
   run("UPDATE service_metric SET value = ? WHERE key = 'benchmark'", [benchmark]);
   run(`UPDATE service_metric SET value = (SELECT COUNT(*) FROM pharmacy_catchment WHERE saturated = 1)
         WHERE key = 'saturated_count'`);

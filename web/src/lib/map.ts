@@ -302,6 +302,8 @@ export type MapData = {
   checked: string[];
   /** Province-wide coverage and capacity, from `service_metric`. */
   capacity: { key: string; value: number; note: string }[];
+  /** Unmet-demand surface: one row per 0.005° cell that still has room for a pharmacy. */
+  opportunity: { lat: number; lon: number; demand: number; supply: number; gap: number; unknown: number }[];
   user: { id: number; displayName: string; role: string };
   /** [index a, index b] into `settlements`. */
   edges: [number, number][];
@@ -865,6 +867,12 @@ export function loadMapData(): MapData {
     checked,
     capacity: all<{ key: string; value: number; note: string }>(
       "SELECT key, value, note FROM service_metric ORDER BY rowid",
+    ),
+    opportunity: all<{
+      lat: number; lon: number; demand: number; supply: number; gap: number; unknown: number;
+    }>(
+      `SELECT lat, lon, demand, supply, gap, unknown FROM opportunity_cell
+        WHERE gap > 0 OR unknown = 1 ORDER BY gap DESC`,
     ),
     user: { id: user.id, displayName: user.displayName, role: user.role },
     edges,

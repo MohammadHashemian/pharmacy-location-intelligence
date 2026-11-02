@@ -43,6 +43,31 @@ const PAD = 14;
 /* 40x put the map at ~12 m/px — Esri zoom 14, which is «aerial photo», not «I can see
    the roof». Detail is a function of the scene scale (194 units per degree), so 600x
    lands near 0.7 m/px and the tile loader below asks for z18-19 there. */
+/* Unmet demand, in residents, at the corners of the opportunity ramp. A cell with 5,000
+   people and no pharmacy is the same red whether it holds 5,000 or 50,000 — the map is for
+   finding places, not for comparing disasters. */
+const OPP_STOPS: [number, string][] = [
+  [150, "#fdba74"],
+  [600, "#f97316"],
+  [1500, "#dc2626"],
+  [3000, "#7f1d1d"],
+];
+function oppColour(gap: number): string {
+  const t = Math.min(1, Math.sqrt(Math.max(0, gap) / 4000));
+  for (let i = 1; i < OPP_STOPS.length; i++) {
+    const [v, c] = OPP_STOPS[i];
+    const [pv, pc] = OPP_STOPS[i - 1];
+    if (gap <= v) return mix(pc, c, (gap - pv) / Math.max(1, v - pv));
+  }
+  return OPP_STOPS[OPP_STOPS.length - 1][1];
+}
+function mix(a: string, b: string, t: number): string {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  const c = pa.map((v, i) => Math.round(v + (pb[i] - v) * Math.max(0, Math.min(1, t))));
+  return `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
 const MAX_ZOOM = 600;
 const RING_EDGES = [25, 50, 75, 100, 150, 200, 300];
 
@@ -383,7 +408,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     /* mode, radius, target and the open candidate travel too: a recommendation you cannot
        send to a partner is half a decision. */
     const m = q.get("m");
-    if (m === "gap" || m === "ratio" || m === "dens" || m === "cap") {
+    if (m === "gap" || m === "ratio" || m === "dens" || m === "cap" || m === "opp") {
       setMode(m);
       setLayers((l) => ({ ...l, density: true }));
     }
@@ -408,7 +433,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   /** Authoritative view for gestures: wheel events fire faster than React can
       re-render, and a stale `view` here would drop every second notch. */
   const viewRef = useRef(view);
-  const [mode, setMode] = useState<"dens" | "gap" | "ratio" | "cap">("dens");
+  const [mode, setMode] = useState<"dens" | "gap" | "ratio" | "cap" | "opp">("dens");
   const [layers, setLayers] = useState({
     density: true,
     network: false,
@@ -1319,6 +1344,40 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   };
 
   /* -------------------------------------------------------------- renders */
+  /* The heat the map was missing. Every cell that still has residents beyond the capacity of
+     the pharmacies reaching it; saturated ground is simply absent, so «کجا جا هست» is the
+     bright part of the picture rather than something to infer from a blue field. */
+  const opportunityLayer = useMemo(() => {
+    if (mode !== "opp" || !data.opportunity.length) return null;
+    const w = 0.005 * scene.kx;
+    const h = 0.005 * scene.scale;
+    return (
+      <g data-layer="opportunity" clipPath="url(#provClip)">
+        {data.opportunity.map((c, i) => {
+          if (c.unknown !== 1 && c.gap < 150) return null;   // <150 people is not a market
+          const [x, y] = scene.proj(c.lat, c.lon);
+          const unknown = c.unknown === 1;
+          return (
+            <rect
+              key={i}
+              x={x - w / 2}
+              y={y - h / 2}
+              width={w + 0.4}
+              height={h + 0.4}
+              fill={unknown ? "#94a3b8" : oppColour(c.gap)}
+              fillOpacity={unknown ? 0.45 : 0.78}
+              stroke="none"
+            >
+              <title>
+                {`${unknown ? "آمار ناقص" : "فرصت"} · تقاضا ${Math.round(c.demand)} · ظرفیت ${c.supply.toFixed(1)} داروخانه · شکاف ${Math.round(c.gap)} نفر`}
+              </title>
+            </rect>
+          );
+        })}
+      </g>
+    );
+  }, [mode, data.opportunity, scene.kx, scene.scale, scene]);
+
   const dotLayer = useMemo(
     () => (
       <g>
@@ -2640,6 +2699,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                   ["ratio", "نفر/داروخانه", "نفر به ازای داروخانه"],
                   ["gap", "شکاف", "شکاف ظرفیت"],
                   ["cap", "ظرفیت", "ظرفیت باقی‌مانده"],
+                  ["opp", "فرصت", "فرصت داروخانه"],
                 ] as const
               ).map(([id, short, long]) => (
                 <button
@@ -2920,7 +2980,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                   data-layer="density"
                   shapeRendering="crispEdges"
                   clipPath="url(#provClip)"
-                  opacity={onlyUnnamed || mode === "cap" ? 0 : 0.92}
+                  opacity={onlyUnnamed || mode === "cap" || mode === "opp" ? 0 : 0.92}
                 >
                   {fineCells.cells.map((c, i) => (
                     <rect
@@ -3004,11 +3064,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               })()}
 
               <g data-layer="streets">{streetLayer}</g>
+              {opportunityLayer}
               <g data-layer="network">{layers.network ? edgeLayer : null}</g>
               {/* 3,677 settlement dots hide twelve pins: reviewing them is a different map */}
-              <g data-layer="settlements">{onlyUnnamed ? null : dotLayer}</g>
-              <g data-layer="medical">{medicalLayer}</g>
-              <g data-layer="pharmacy">{pharmacyLayer}</g>
+              <g data-layer="settlements">{onlyUnnamed || mode === "opp" ? null : dotLayer}</g>
+              <g data-layer="medical">{mode === "opp" ? null : medicalLayer}</g>
+              <g data-layer="pharmacy">{mode === "opp" ? null : pharmacyLayer}</g>
               {surveyLayer}
               {measureLayer}
               {neighbourhoodLayer}
@@ -3125,6 +3186,37 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             </g>
 
           </svg>
+          {mode === "opp" ? (
+            <div
+              data-legend="opportunity"
+              className="pointer-events-none absolute bottom-2 right-2 z-20 rounded-xl border border-line bg-surface/95 px-2.5 py-2 text-[10px] shadow-lg"
+            >
+              <div className="mb-1 font-semibold text-ink">فرصت داروخانه</div>
+              <div className="flex items-center gap-1.5">
+                {[
+                  [150, "۱۵۰"],
+                  [600, "۶۰۰"],
+                  [1500, "۱٬۵۰۰"],
+                  [3000, "۳٬۰۰۰+"],
+                ].map(([v, label], i) => (
+                  <span key={i} className="flex flex-col items-center gap-0.5">
+                    <span
+                      className="inline-block h-3 w-6 rounded-sm"
+                      style={{ backgroundColor: oppColour(Number(v)) }}
+                    />
+                    <span className="text-[8.5px] text-muted">{label}</span>
+                  </span>
+                ))}
+              </div>
+              <div className="mt-1 text-[9px] text-muted">
+                نفر بدون ظرفیت در همان سلول · هر سلول ≈ ۰٫۵ کیلومتر
+              </div>
+              <div className="mt-0.5 flex items-center gap-1 text-[9px] text-muted">
+                <span className="inline-block h-2 w-3 rounded-sm bg-[#94a3b8]" /> آمار ناقص
+              </div>
+            </div>
+          ) : null}
+
           {layers.sat ? (
             <div className="pointer-events-none absolute bottom-1 left-2 z-10 rounded bg-white/85 px-1.5 py-0.5 text-[9.5px] text-[#334155] shadow-sm">
               تصویر: Esri · Maxar · Earthstar Geographics
@@ -3792,6 +3884,23 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="flex h-2 w-24 overflow-hidden rounded-full">
+              {mode === "opp" ? (
+                <div className="flex items-center gap-2 text-[10px] text-muted">
+                  <span>تقاضای بدون پوشش:</span>
+                  {[[0, "کم"], [400, ""], [1200, ""], [2600, "زیاد"]].map(([v, label], i) => (
+                    <span key={i} className="flex items-center gap-1">
+                      <span
+                        className="inline-block h-2 w-3 rounded-sm"
+                        style={{ backgroundColor: oppColour(Number(v)) }}
+                      />
+                      {label ? <span>{label}</span> : null}
+                    </span>
+                  ))}
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-2 w-3 rounded-sm bg-[#94a3b8]" /> آمار ناقص
+                  </span>
+                </div>
+              ) : null}
               {mode === "cap" ? (
                 <div className="flex items-center gap-2 text-[10px] text-muted">
                   <span className="flex items-center gap-1">

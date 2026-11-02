@@ -402,6 +402,32 @@ without touching the grid, and the map recolours:
 Ahvaz (1.2 M) is saturated and absent from the «room» ranking, the benchmark dial moves the
 saturated count 83 → 32 and back, and the map draws all four colours.
 
+### «کجا جا هست» — the unmet-demand surface (`opportunity_cell`)
+
+The density choropleth answered the wrong question. It coloured *supply* — red where pharmacies
+cluster — so the saturated centre of اهواز lit up and the empty range stayed neutral. A person
+looking for a location reads that as «the busiest place is the best place», which is backwards.
+
+`etl/opportunity_grid.py` writes the question that matters, per 0.005° cell (~0.5 km):
+
+    demand(cell) = the settlement's population, spread over the cells inside its own built
+                   footprint (the Voronoi area compute_capacity.py measured)
+    supply(cell) = its FDA register count over the same cells, plus 1 for every live pin
+                   within 1.5 km
+    gap(cell)    = demand − 5,408 × supply        [residents]
+
+Bright = people live here and the shops that reach them are already full. The saturated core is
+**absent by construction** — there is nothing to recommend there. Grey = a town of 10,000 with
+no register row and no pin nearby (a data gap, not a market).
+
+Measured on today's data: **12,439 cells with demand, 714,147 residents above local capacity,
+deepest single cell 5,425**. Mode «فرصت» on `/map` draws only cells with `gap ≥ 150` (998 of
+them) so the surface reads as places, not as noise, hides the settlement/pharmacy markers that
+would compete with it, and carries its own legend.
+
+`tools/test_opportunity.py`: the surface exists, the core of اهواز (3 km) has **zero** bright
+cells, the hottest cells are populated and rural, small gaps are not drawn, the legend renders.
+
 ### Renaming a surveyed area (PATCH `/api/surveys`)
 
 A typo used to cost the polygon: delete, walk the streets again, redraw. Every area row now
