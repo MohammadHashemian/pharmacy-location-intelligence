@@ -43,7 +43,7 @@ export function ShortlistPanel({
   const newest = items[0]?.snapshotAt?.slice(0, 10) ?? "";
 
   return (
-    <div className="rounded-2xl border border-line bg-surface p-2.5">
+    <div data-panel="shortlist" className="rounded-2xl border border-line bg-surface p-2.5">
       <div className="mb-1.5 flex items-center justify-between">
         <span className="text-[12px] font-semibold text-ink">
           فهرست کوتاه · {group(items.length)}

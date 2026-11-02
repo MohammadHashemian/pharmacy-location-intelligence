@@ -19,6 +19,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../src")
 from fetch_zarfiat import find_local_chromium  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
+from _fixtures import PREFIX, sweep  # noqa: E402
 
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(HOME, "db", "pharmacy.sqlite")
@@ -36,11 +37,9 @@ def api(path: str, body: dict | None = None, method: str | None = None) -> dict:
 
 
 def main() -> int:
-    # clean slate for the owner
-    for it in api("/api/prospects")["items"]:
-        api(f"/api/prospects?id={it['id']}", method="DELETE")
-    for it in api("/api/surveys")["items"]:
-        api(f"/api/surveys?id={it['id']}", method="DELETE")
+    # remove only this file's own fixtures — the owner's areas stay
+    sweep(api, "/api/prospects")
+    sweep(api, "/api/surveys")
 
     ok = True
 
@@ -64,7 +63,7 @@ def main() -> int:
         pg.wait_for_timeout(300)
         pg.mouse.click(box["x"] + box["width"] * 0.4, box["y"] + box["height"] * 0.4)
         pg.wait_for_timeout(500)
-        pg.fill('input[placeholder="نام مکان (مثلاً نبش خیابان …)"]', "نبش خیابان آزمون")
+        pg.fill('input[placeholder="نام مکان (مثلاً نبش خیابان …)"]', f"{PREFIX} نبش خیابان")
         pg.fill('input[placeholder="یادداشت: اجاره، متراژ، تماس…"]', "اجاره ۲۰ متر")
         pg.get_by_role("button", name="افزودن به فهرست").click()
         pg.wait_for_timeout(2200)
@@ -74,7 +73,7 @@ def main() -> int:
         check("stored against the owner user", bool(items) and items[0].get("priority") == 2)
         check("flag drawn on the map",
               pg.locator('g[data-layer="prospects"] g[data-prospect]').count() == 1)
-        check("listed in the visit panel", "نبش خیابان آزمون" in pg.inner_text("body"))
+        check("listed in the visit panel", f"{PREFIX} نبش خیابان" in pg.inner_text("body"))
 
         c = sqlite3.connect(DB)
         row = c.execute("SELECT user_id, status, note FROM prospect ORDER BY id DESC LIMIT 1").fetchone()
@@ -89,18 +88,22 @@ def main() -> int:
         c.close()
         check("status cycles to visited", st[0] == "visited", f"status {st[0]}, at {st[1]}")
 
+        before_owner_surveys = len([a for a in api("/api/surveys")["items"]
+                                    if not a["name"].startswith(PREFIX)])
+        before_shapes = pg.locator('g[data-layer="surveys"] g[data-survey]').count()
+
         # ---- 3. draw an area
         pg.locator('button[aria-label="کشیدن محدوده"]').click()
         pg.wait_for_timeout(300)
         for fx, fy in ((0.3, 0.3), (0.45, 0.32), (0.42, 0.45)):
             pg.mouse.click(box["x"] + box["width"] * fx, box["y"] + box["height"] * fy)
             pg.wait_for_timeout(250)
-        pg.fill('input[placeholder="نام محله یا محدوده"]', "محلهٔ آزمون")
+        pg.fill('input[placeholder="نام محله یا محدوده"]', f"{PREFIX} محله")
         pg.get_by_role("button", name="ثبت محدوده").click()
         pg.wait_for_timeout(2200)
 
-        surveys = api("/api/surveys")["items"]
-        check("area saved", len(surveys) == 1, f"{len(surveys)} area")
+        surveys = [a for a in api("/api/surveys")["items"] if a["name"].startswith(PREFIX)]
+        check("area saved", len(surveys) == 1, f"{len(surveys)} fixture area(s)")
         check("area has 3+ points and a size",
               bool(surveys) and len(surveys[0]["points"]) >= 3 and (surveys[0]["areaKm2"] or 0) > 0,
               f"{len(surveys[0]['points']) if surveys else 0} points · "
@@ -109,10 +112,11 @@ def main() -> int:
         drawn = 0
         for _ in range(20):
             drawn = pg.locator('g[data-layer="surveys"] g[data-survey]').count()
-            if drawn >= 1:
+            if drawn > before_shapes:
                 break
             pg.wait_for_timeout(500)
-        check("polygon drawn on the map", drawn == 1, f"{drawn} polygons")
+        check("polygon drawn on the map", drawn == before_shapes + 1,
+              f"{drawn} polygons (was {before_shapes})")
 
         # ---- 5. per-user scoping
         c = sqlite3.connect(DB)
@@ -145,22 +149,32 @@ def main() -> int:
         pg.reload(wait_until="domcontentloaded")
         pg.wait_for_selector('g#scene[data-ready="1"]', timeout=60000)
         pg.wait_for_timeout(2500)
-        for pid in [i["id"] for i in api("/api/prospects")["items"]]:
+        for pid in [i["id"] for i in api("/api/prospects")["items"]
+                    if i["name"].startswith(PREFIX)]:
             b = pg.locator(f'button[data-del="prospect-{pid}"]')
             if b.count():
                 b.click()
                 pg.wait_for_timeout(1500)
-        for sid in [i["id"] for i in api("/api/surveys")["items"]]:
+        for sid in [i["id"] for i in api("/api/surveys")["items"]
+                    if i["name"].startswith(PREFIX)]:
             b = pg.locator(f'button[data-del="survey-{sid}"]')
             if b.count():
                 b.click()
                 pg.wait_for_timeout(1500)
+        def fixtures():
+            p = [i for i in api("/api/prospects")["items"] if i["name"].startswith(PREFIX)]
+            a = [i for i in api("/api/surveys")["items"] if i["name"].startswith(PREFIX)]
+            return p, a
+
         for _ in range(10):
-            if not api("/api/prospects")["items"] and not api("/api/surveys")["items"]:
+            if not any(fixtures()):
                 break
             pg.wait_for_timeout(600)
-        check("both deleted", not api("/api/prospects")["items"] and not api("/api/surveys")["items"],
-              "lists empty")
+        p_left, a_left = fixtures()
+        owner_s = [i for i in api("/api/surveys")["items"]]
+        check("both fixtures deleted", not p_left and not a_left, "fixtures gone")
+        check("the owner's areas were left alone", len(owner_s) == before_owner_surveys,
+              f"{len(owner_s)} of {before_owner_surveys}")
         br.close()
 
     print("\nRESULT:", "per-user annotations work" if ok else "FAILED")

@@ -22,6 +22,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../src")
 from fetch_zarfiat import find_local_chromium  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
+from _fixtures import PREFIX, sweep  # noqa: E402
 
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(HOME, "db", "pharmacy.sqlite")
@@ -40,8 +41,7 @@ def api(path: str, body: dict | None = None, method: str | None = None) -> dict:
 
 
 def main() -> int:
-    for m in api("/api/measure")["items"]:
-        api(f"/api/measure?id={m['id']}", method="DELETE")
+    sweep(api, "/api/measure")
 
     ok = True
 
@@ -71,6 +71,8 @@ def main() -> int:
     check("a larger polygon holds more people", mb["population"] > ms["population"],
           f"{mb['population']} > {ms['population']}")
 
+    baseline_measures = len(api("/api/measure")["items"])
+
     # ---- draw and save two areas through the UI
     with sync_playwright() as pw:
         br = pw.chromium.launch(headless=True, executable_path=find_local_chromium())
@@ -95,17 +97,18 @@ def main() -> int:
             pg.get_by_role("button", name="ذخیره برای مقایسه").click()
             pg.wait_for_timeout(2200)
 
-        draw("کوی منتظری", [(0.38, 0.42), (0.46, 0.42), (0.46, 0.50), (0.38, 0.50)])
-        draw("کوت نواصر", [(0.55, 0.55), (0.64, 0.55), (0.64, 0.63), (0.55, 0.63)])
+        draw(f"{PREFIX} کوی منتظری", [(0.38, 0.42), (0.46, 0.42), (0.46, 0.50), (0.38, 0.50)])
+        draw(f"{PREFIX} کوت نواصر", [(0.55, 0.55), (0.64, 0.55), (0.64, 0.63), (0.55, 0.63)])
 
-        items = api("/api/measure")["items"]
+        items = [m for m in api("/api/measure")["items"] if m["name"].startswith(PREFIX)]
         check("two measurements saved", len(items) == 2,
               ", ".join(f"{i['name']} {i['areaKm2']}km²" for i in items))
         check("each carries a population estimate",
               all(i["population"] > 0 for i in items),
               " · ".join(str(i["population"]) for i in items))
         check("polygons drawn on the map",
-              pg.locator('g[data-layer="measures"] g[data-measure]').count() == 2)
+              pg.locator('g[data-layer="measures"] g[data-measure]').count() >= 2,
+              f"{pg.locator('g[data-layer=\"measures\"] g[data-measure]').count()} polygons")
 
         table = pg.locator('div:has(> div:has-text("مقایسهٔ مساحت‌ها"))').first.inner_text()
         flat = table.translate(FA)
@@ -119,11 +122,11 @@ def main() -> int:
         first = items[0]
         pg.locator(f'button[data-del="measure-{first["id"]}"]').first.click()
         pg.wait_for_timeout(1800)
-        check("delete removes one measurement", len(api("/api/measure")["items"]) == 1)
+        check("delete removes one measurement",
+              len([m for m in api("/api/measure")["items"] if m["name"].startswith(PREFIX)]) == 1)
         br.close()
 
-    for m in api("/api/measure")["items"]:
-        api(f"/api/measure?id={m['id']}", method="DELETE")
+    sweep(api, "/api/measure")
 
     print("\nRESULT:", "areas can be measured and compared" if ok else "FAILED")
     return 0 if ok else 1

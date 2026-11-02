@@ -439,6 +439,32 @@ would compete with it, and carries its own legend.
 `tools/test_opportunity.py`: the surface exists, the core of اهواز (3 km) has **zero** bright
 cells, the hottest cells are populated and rural, small gaps are not drawn, the legend renders.
 
+### Annotations were never lost to a refresh — a test deleted them
+
+The areas were always in SQLite (`survey_area`, keyed by `user_id`) and always reloaded from
+there; nothing was ever kept in local storage. They vanished because two test files cleaned up
+like this:
+
+```python
+for it in api("/api/surveys")["items"]:      # ← every row, not just its own
+    api(f"/api/surveys?id={it['id']}", method="DELETE")
+```
+
+`test_survey_rename.py` and `test_visitlist.py` wiped the owner's areas; `test_measure.py` did
+the same to measurements. Three changes:
+
+1. **Recovery** — `etl/recover_annotations.py` scans `pharmacy.sqlite-wal` for JSON point
+   arrays, pairs each with the label stored just before it, and reinserts what is missing.
+   It restored **7 areas (6.7 km²)**: کوی منتظری (رد شد), قلعه چنعان, کوت نواصر, کوی هادی
+   (رد شد), جنگیه, عین دو, کوت سید صالح. Two older drafts of the same names were also in the
+   WAL and came back — delete them if they are duplicates.
+2. **`tools/_fixtures.py`** — `sweep()` deletes only rows whose name starts with `آزمون`;
+   every test names its fixtures with that prefix and counts only them.
+3. **`tools/test_fixture_isolation.py`** — plants a row that looks like the owner's work, runs
+   the shared sweep, and asserts it survives.
+
+A DB copy is taken before any recovery: `db/pharmacy.sqlite.bak-before-restore-*`.
+
 ### Renaming a surveyed area (PATCH `/api/surveys`)
 
 A typo used to cost the polygon: delete, walk the streets again, redraw. Every area row now

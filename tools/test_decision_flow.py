@@ -23,6 +23,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../src")
 from fetch_zarfiat import find_local_chromium  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
+from _fixtures import PREFIX, sweep  # noqa: E402
 
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(HOME, "db", "pharmacy.sqlite")
@@ -50,8 +51,7 @@ def hav(a, b, c, d):
 
 
 def main() -> int:
-    for it in api("/api/shortlist")["items"]:
-        api(f"/api/shortlist?id={it['id']}", method="DELETE")
+    baseline = {it["id"] for it in api("/api/shortlist")["items"]}
 
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
@@ -100,7 +100,8 @@ def main() -> int:
         items = api("/api/shortlist")["items"]
         check("both shortlisted", len(items) == 2, f"{len(items)} items")
 
-        panel = pg.locator('div:has(> div:has-text("فهرست کوتاه"))').first.inner_text().translate(FA)
+        panel = (pg.locator('div[data-panel="shortlist"]').first.inner_text()
+                 .translate(FA).replace("٫", "."))
         check("panel shows both scores",
               all(f"{it['score']:.2f}" in panel for it in items),
               ", ".join(f"{it['score']:.2f}" for it in items))
@@ -121,7 +122,8 @@ def main() -> int:
         br.close()
 
     for it in api("/api/shortlist")["items"]:
-        api(f"/api/shortlist?id={it['id']}", method="DELETE")
+        if it["id"] not in baseline:      # only what this run added
+            api(f"/api/shortlist?id={it['id']}", method="DELETE")
 
     print("\nRESULT:", "the tool answers «where should I open?»" if ok else "FAILED")
     return 0 if ok else 1

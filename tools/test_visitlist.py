@@ -17,6 +17,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../src")
 from fetch_zarfiat import find_local_chromium  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
+from _fixtures import PREFIX, sweep  # noqa: E402
 
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(HOME, "db", "pharmacy.sqlite")
@@ -35,8 +36,7 @@ def api(path: str, body: dict | None = None, method: str | None = None) -> dict:
 
 
 def main() -> int:
-    for it in api("/api/prospects")["items"]:
-        api(f"/api/prospects?id={it['id']}", method="DELETE")
+    sweep(api, "/api/prospects")
 
     ok = True
 
@@ -48,7 +48,7 @@ def main() -> int:
     # ---- 14 places, priorities spanning 1..9, three of them already visited
     for i in range(N):
         api("/api/prospects", {
-            "name": f"مکان بازدید {i + 1}",
+            "name": f"{PREFIX} مکان {i + 1}",
             "lat": 31.30 + i * 0.001,
             "lon": 48.66 + i * 0.001,
             "note": "اجاره/متراژ",
@@ -56,7 +56,7 @@ def main() -> int:
             "status": "visited" if i < 3 else "todo",
         }, "POST")
 
-    items = api("/api/prospects")["items"]
+    items = [i for i in api("/api/prospects")["items"] if i["name"].startswith(PREFIX)]
     check(f"{N} places stored", len(items) == N, f"{len(items)} rows")
     check("priority accepts 1..9, not just 1..3",
           max(i["priority"] for i in items) >= 7,
@@ -102,16 +102,15 @@ def main() -> int:
               f"{before} → {row['priority'] if row else '?'}")
 
         # ---- one more, added while the page is open
-        api("/api/prospects", {"name": "مکان تازه‌وارد", "lat": 31.31, "lon": 48.67,
+        api("/api/prospects", {"name": f"{PREFIX} تازه‌وارد", "lat": 31.31, "lon": 48.67,
                                "priority": 1}, "POST")
         pg.reload(wait_until="domcontentloaded")
         pg.wait_for_selector('g#scene[data-ready="1"]', timeout=60000)
         pg.wait_for_timeout(2000)
-        check("a new place appears after reload", "مکان تازه‌وارد" in pg.inner_text("body"))
+        check("a new place appears after reload", f"{PREFIX} تازه‌وارد" in pg.inner_text("body"))
         br.close()
 
-    for it in api("/api/prospects")["items"]:
-        api(f"/api/prospects?id={it['id']}", method="DELETE")
+    sweep(api, "/api/prospects")
 
     print("\nRESULT:", "the watch list has no cap and stays usable" if ok else "FAILED")
     return 0 if ok else 1

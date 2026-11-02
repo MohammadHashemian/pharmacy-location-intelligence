@@ -17,6 +17,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../src")
 from fetch_zarfiat import find_local_chromium  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
+from _fixtures import PREFIX, sweep  # noqa: E402
 
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(HOME, "db", "pharmacy.sqlite")
@@ -34,11 +35,10 @@ def api(path: str, body: dict | None = None, method: str | None = None) -> dict:
 
 
 def main() -> int:
-    for it in api("/api/surveys")["items"]:
-        api(f"/api/surveys?id={it['id']}", method="DELETE")
+    sweep(api, "/api/surveys")
 
     poly = [[31.30, 48.66], [31.31, 48.66], [31.31, 48.67], [31.30, 48.67]]
-    made = api("/api/surveys", {"name": "محدودهٔ آزمون", "points": poly, "note": "probe"}, "POST")
+    made = api("/api/surveys", {"name": f"{PREFIX} محدوده", "points": poly, "note": "probe"}, "POST")
     sid = made["id"]
     area_before = made["areaKm2"]
 
@@ -58,14 +58,14 @@ def main() -> int:
         pg.wait_for_timeout(2200)
 
         panel = pg.locator('div[data-panel="survey"]')
-        check("the area is listed", "محدودهٔ آزمون" in panel.inner_text())
+        check("the area is listed", f"{PREFIX} محدوده" in panel.inner_text())
 
         # ---- the ✎ button opens the field with the current name
         panel.locator(f'[data-editbtn="survey-{sid}"]').click()
         field = panel.locator(f'[data-edit="survey-{sid}"]')
         check("✎ opens an inline field", field.count() == 1)
         check("the field starts from the current name",
-              field.input_value() == "محدودهٔ آزمون", field.input_value())
+              field.input_value() == f"{PREFIX} محدوده", field.input_value())
 
         field.fill("کوی منتظری — شمال خیابان")
         field.press("Enter")
