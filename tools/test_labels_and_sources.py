@@ -67,7 +67,8 @@ def main() -> int:
         for name, tag, why in ((fda, "فید", "FDA register"), (mapped, "نقشه", "mapped only")):
             pg.fill('input[placeholder="جستجوی نام، شهرستان، بخش یا دهستان…"]', name)
             pg.wait_for_timeout(600)
-            row = pg.locator("tr", has_text=name).first
+            # scope to the settlement table: the shortlist comparison also contains names
+            row = pg.locator('table:has(th:text("کمبود داروخانه")) tr', has_text=name).first
             cells = [x.strip() for x in row.locator("td").all_inner_texts()]
             check(f"{why} row tagged «{tag}»", any(tag in c for c in cells),
                   " | ".join(cells[:7]))

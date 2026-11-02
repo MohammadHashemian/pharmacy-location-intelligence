@@ -2206,22 +2206,73 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           sticky card slid over the sidebar and the table while scrolling. */}
       <div
         ref={cardRef}
-        style={isFull ? undefined : { maxWidth: "min(100%, 920px, max(700px, calc((100vh - 140px) * 0.9)))" }}
-        className={`mx-auto w-full min-w-0 bg-surface p-2.5 sm:p-3 ${
+        /* The width used to be capped by viewport height, which left a wide empty band
+           between the sidebar and the map on a short window — the map is the page's whole
+           point, so it takes the column and the page scrolls instead. 980 is only there to
+           stop it becoming absurd on a 2k monitor. */
+        style={isFull ? undefined : { maxWidth: "min(100%, 980px)" }}
+        className={`w-full min-w-0 bg-surface p-2.5 sm:p-3 ${
           isFull
             ? "flex h-screen w-screen max-w-none flex-col rounded-none border-0"
             : "rounded-2xl border border-line shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]"
         }`}>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-1.5">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="text-[13px] font-semibold text-ink">
               نقشهٔ سکونتگاه‌ها و تراکم داروخانه
             </span>
             <span className="whitespace-nowrap rounded-md border border-line-strong bg-surface-2 px-1.5 py-0.5 text-[10.5px] text-muted">
               {group(settlements.length)} نقطه · {group(scene.cells.length)} سلول مسکونی
             </span>
+            <span className="flex-1" />
+            {/* six checkboxes used to eat three wrapped rows; they live in one
+                popover now, and the toolbar stays a single line */}
+            <details className="relative sm:ml-auto">
+              <summary className="flex cursor-pointer list-none items-center gap-1 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[11px] text-muted transition hover:text-ink">
+                لایه‌های نقشه
+                <span aria-hidden className="text-[9px] leading-none">▾</span>
+              </summary>
+              <div className="absolute left-0 z-30 mt-1 grid w-48 gap-0.5 rounded-xl border border-line bg-surface p-2 shadow-xl">
+                {(
+                  [
+                    ["density", "سلول تراکم"],
+                    ["network", "شبکهٔ فاصله"],
+                    ["admin", "مرزها"],
+                    ["labels", "برچسب‌ها"],
+                    ["pharm", "داروخانه‌دار"],
+                    ["streets", "خیابان‌ها"],
+                    ["med", "خدمات درمانی"],
+                    ["osm", "داروخانه‌های نقشه"],
+                    ["sat", "تصویر ماهواره‌ای"],
+                    ["sites", "پیشنهادهای مکانی"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <label
+                    key={id}
+                    className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] text-ink-soft hover:bg-surface-2"
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-3 w-3 accent-[#0d9488]"
+                      checked={layers[id]}
+                      onChange={(e) => setLayers((l) => ({ ...l, [id]: e.target.checked }))}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </details>
+            <button
+              type="button"
+              onClick={toggleFull}
+              aria-label={isFull ? "خروج از تمام‌صفحه" : "تمام‌صفحه"}
+              title={isFull ? "خروج از تمام‌صفحه (Esc)" : "نمایش تمام‌صفحهٔ نقشه"}
+              className="rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[11px] text-muted transition hover:border-brand hover:text-brand-ink"
+            >
+              {isFull ? "⤡ خروج" : "⤢"}
+            </button>
           </div>
-          <div className="flex w-full flex-wrap items-center gap-1.5">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5">
             {unnamedCount > 0 ? (
               <button
                 type="button"
@@ -2282,14 +2333,17 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             <div className="flex overflow-hidden rounded-lg border border-line-strong">
               {(
                 [
-                  ["dens", "تراکم داروخانه"],
-                  ["ratio", "نفر به ازای داروخانه"],
-                  ["gap", "شکاف ظرفیت"],
+                  /* short visible label, full accessible name: the toolbar has to fit on
+                     one line, and tests should not depend on copy */
+                  ["dens", "تراکم", "تراکم داروخانه"],
+                  ["ratio", "نفر/داروخانه", "نفر به ازای داروخانه"],
+                  ["gap", "شکاف", "شکاف ظرفیت"],
                 ] as const
-              ).map(([id, label]) => (
+              ).map(([id, short, long]) => (
                 <button
                   key={id}
                   type="button"
+                  aria-label={long}
                   onClick={() => {
                     setMode(id);
                     setLayers((l) => ({ ...l, density: true }));
@@ -2300,7 +2354,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                       : "bg-surface text-muted hover:text-ink"
                   }`}
                 >
-                  {label}
+                  {short}
                 </button>
               ))}
             </div>
@@ -2315,9 +2369,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                   ? "border-danger/40 bg-danger-soft text-danger"
                   : "border-line bg-surface text-muted hover:text-ink"
               }`}
+              aria-label="تحلیل یک نقطه"
               title="روی هر نقطه از نقشه کلیک کنید تا جمعیت و داروخانه‌های اطراف آن سنجیده شود"
             >
-              {probeMode ? "روی نقشه کلیک کنید…" : "تحلیل یک نقطه"}
+              {probeMode ? "روی نقشه کلیک کنید…" : "تحلیل نقطه"}
             </button>
             <button
               type="button"
@@ -2332,54 +2387,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                   ? "border-good/50 bg-good-soft text-good"
                   : "border-line bg-surface text-muted hover:text-ink"
               }`}
+              aria-label="افزودن داروخانه"
               title="اگر داروخانه‌ای روی نقشه نیست، اینجا اضافه کنید"
             >
-              {addMode ? "روی نقشه کلیک کنید…" : "افزودن داروخانه"}
-            </button>
-            {/* six checkboxes used to eat three wrapped rows; they live in one
-                popover now, and the toolbar stays a single line */}
-            <details className="relative sm:ml-auto">
-              <summary className="flex cursor-pointer list-none items-center gap-1 rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[11px] text-muted transition hover:text-ink">
-                لایه‌های نقشه
-                <span aria-hidden className="text-[9px] leading-none">▾</span>
-              </summary>
-              <div className="absolute left-0 z-30 mt-1 grid w-48 gap-0.5 rounded-xl border border-line bg-surface p-2 shadow-xl">
-                {(
-                  [
-                    ["density", "سلول تراکم"],
-                    ["network", "شبکهٔ فاصله"],
-                    ["admin", "مرزها"],
-                    ["labels", "برچسب‌ها"],
-                    ["pharm", "داروخانه‌دار"],
-                    ["streets", "خیابان‌ها"],
-                    ["med", "خدمات درمانی"],
-                    ["osm", "داروخانه‌های نقشه"],
-                    ["sat", "تصویر ماهواره‌ای"],
-                    ["sites", "پیشنهادهای مکانی"],
-                  ] as const
-                ).map(([id, label]) => (
-                  <label
-                    key={id}
-                    className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] text-ink-soft hover:bg-surface-2"
-                  >
-                    <input
-                      type="checkbox"
-                      className="h-3 w-3 accent-[#0d9488]"
-                      checked={layers[id]}
-                      onChange={(e) => setLayers((l) => ({ ...l, [id]: e.target.checked }))}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </details>
-            <button
-              type="button"
-              onClick={toggleFull}
-              title={isFull ? "خروج از تمام‌صفحه (Esc)" : "نمایش تمام‌صفحهٔ نقشه"}
-              className="rounded-lg border border-line-strong bg-surface px-2.5 py-1 text-[11px] text-muted transition hover:border-brand hover:text-brand-ink"
-            >
-              {isFull ? "⤡ خروج" : "⤢ تمام‌صفحه"}
+              {addMode ? "روی نقشه کلیک کنید…" : "افزودن"}
             </button>
           </div>
         </div>
@@ -3478,8 +3489,8 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
       {/* ---------------------------------------------------------- table -- */}
       <div className="min-w-0 rounded-2xl border border-line bg-surface p-3 lg:col-span-2">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-1.5">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="text-[13px] font-semibold text-ink">
               گزینه در سطح آبادی · شعاع {group(radius)} کیلومتر · معیار: کمبود داروخانه
             </span>
