@@ -371,6 +371,37 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Density is area served, not settlements per shop (`service_metric`)
+
+The old number was residents per pharmacy **per settlement** — one shop in a 40 km² آبادی read
+as «density 1», as if that one counter occupied the whole district. `etl/compute_capacity.py`
+replaces it with measurements that have a denominator:
+
+| metric | value | how |
+|---|---|---|
+| built-up area | **2,687 km²** | every cell holding a street vertex, from the 87 cached `streets_city-*.json` |
+| inside 1.5 km of a pharmacy | **699 km² (26.0 %)** | union of discs, each cell counted once |
+| population inside 1.5 km | **74.2 %** | settlement populations whose nearest pharmacy is that close |
+| no pharmacy within 8 km | **668,569 people** | the honest «unserved» number |
+| residents per mapped pharmacy | **10,967** | 4.78 M people, 436 pins |
+| saturated pharmacies | **83** | catchment above the benchmark |
+
+Per settlement (`v_settlement_capacity`): nearest pharmacy, shops within 1.5/3 km, its own
+Voronoi footprint, `population / footprint` (real residents per km²), and `remaining` =
+`population − supply × benchmark`. Supply is the **FDA register** where it is larger than the
+map, because an unmapped pharmacy still exists; a city with no register row is marked
+`supply_known = 0` and shows «آمار ناقص» rather than a fake 100k of unmet demand.
+
+The benchmark is a dial, not a measurement — `/api/capacity` POST recomputes every capacity
+without touching the grid, and the map recolours:
+
+* **red** — saturated (زیاد از ظرفیت), **green** — room, **amber** — no pharmacy at all,
+  **grey** — numbers incomplete.
+
+`tools/test_capacity.py`: coverage between 2 % and 60 %, density equals population ÷ footprint,
+Ahvaz (1.2 M) is saturated and absent from the «room» ranking, the benchmark dial moves the
+saturated count 83 → 32 and back, and the map draws all four colours.
+
 ### «بررسی شد» is a row in the database, per user (`/api/checks`)
 
 Two different things were being conflated, so both are now explicit:

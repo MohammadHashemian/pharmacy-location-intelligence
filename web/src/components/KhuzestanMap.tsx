@@ -34,6 +34,7 @@ import type { MapCell, MapData, MapSettlement, MapShape } from "@/lib/map";
 import { group, num, shortCounty, toPersianDigits } from "@/lib/format";
 import { PlacePanel } from "@/components/PharmacyPanel";
 import { ShortlistPanel } from "@/components/ShortlistPanel";
+import { CapacityPanel } from "@/components/CapacityPanel";
 import { VisitPanel, SurveyPanel, MeasurePanel, nextStatus } from "@/components/AnnotationPanels";
 
 const W = 660;
@@ -382,7 +383,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     /* mode, radius, target and the open candidate travel too: a recommendation you cannot
        send to a partner is half a decision. */
     const m = q.get("m");
-    if (m === "gap" || m === "ratio" || m === "dens") {
+    if (m === "gap" || m === "ratio" || m === "dens" || m === "cap") {
       setMode(m);
       setLayers((l) => ({ ...l, density: true }));
     }
@@ -407,7 +408,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   /** Authoritative view for gestures: wheel events fire faster than React can
       re-render, and a stale `view` here would drop every second notch. */
   const viewRef = useRef(view);
-  const [mode, setMode] = useState<"dens" | "gap" | "ratio">("dens");
+  const [mode, setMode] = useState<"dens" | "gap" | "ratio" | "cap">("dens");
   const [layers, setLayers] = useState({
     density: true,
     network: false,
@@ -1339,7 +1340,19 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 cx={p.x}
                 cy={p.y}
                 r={r}
-                fill={city ? COLORS.city : COLORS.village}
+                fill={
+                  mode === "cap"
+                    ? (s.capacity <= 0 && (s.pop ?? 0) > 5000
+                        ? "#94a3b8"
+                        : s.remaining < 0
+                        ? "#dc2626"
+                        : s.nearestKm === null || s.nearestKm > 8
+                          ? "#f59e0b"
+                          : "#16a34a")
+                    : city
+                      ? COLORS.city
+                      : COLORS.village
+                }
                 fillOpacity={on ? (city ? 0.9 : 0.72) : 0.12}
                 stroke={isSel ? "#0f172a" : s.ph > 0 && layers.pharm ? COLORS.pharmacy : "none"}
                 strokeWidth={isSel ? 1.8 : 1.1}
@@ -1499,7 +1512,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         ))}
       </g>
     );
-  }, [scene, layers.osm, view.k, onlyUnnamed, data.pharmacies, checkedSet, unitsPerPx]);
+  }, [scene, layers.osm, view.k, onlyUnnamed, data.pharmacies, checkedSet, unitsPerPx, mode]);
 
   /* Demand side: clinics, doctors, dentists, hospitals, labs. Violet so it never
      reads as a pharmacy, and a plus sign for the ones that write prescriptions. */
@@ -2626,6 +2639,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                   ["dens", "تراکم", "تراکم داروخانه"],
                   ["ratio", "نفر/داروخانه", "نفر به ازای داروخانه"],
                   ["gap", "شکاف", "شکاف ظرفیت"],
+                  ["cap", "ظرفیت", "ظرفیت باقی‌مانده"],
                 ] as const
               ).map(([id, short, long]) => (
                 <button
@@ -2906,7 +2920,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                   data-layer="density"
                   shapeRendering="crispEdges"
                   clipPath="url(#provClip)"
-                  opacity={onlyUnnamed ? 0 : 0.92}
+                  opacity={onlyUnnamed || mode === "cap" ? 0 : 0.92}
                 >
                   {fineCells.cells.map((c, i) => (
                     <rect
@@ -3778,6 +3792,19 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="flex h-2 w-24 overflow-hidden rounded-full">
+              {mode === "cap" ? (
+                <div className="flex items-center gap-2 text-[10px] text-muted">
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-full bg-[#dc2626]" /> اشباع
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-full bg-[#16a34a]" /> جای رشد
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-2 w-2 rounded-full bg-[#f59e0b]" /> بدون دسترسی
+                  </span>
+                </div>
+              ) : null}
               {(mode === "dens" ? DENS_RAMP : mode === "gap" ? GAP_RAMP : RATIO_RAMP).map((c) => (
                 <span key={c} className="flex-1" style={{ background: c }} />
               ))}
@@ -3841,6 +3868,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           }}
         />
 
+        <CapacityPanel initial={data.capacity} />
         <VisitPanel
           items={data.prospects}
           onFocus={(p) => flyLatLon(p.lat, p.lon, 15)}

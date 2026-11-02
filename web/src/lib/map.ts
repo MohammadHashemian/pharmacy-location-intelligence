@@ -35,6 +35,14 @@ export type MapSettlement = {
   popFda: number | null;
   popOsm: number | null;
   popManual: number | null;
+  /** Nearest pharmacy, walkable supply, built footprint and spare capacity. */
+  nearestKm: number | null;
+  ph1500: number;
+  footprintKm2: number | null;
+  density: number | null;
+  capacity: number;
+  supply: number;
+  remaining: number;
   lat: number;
   lon: number;
   /** Supply we can actually count: the FDA register, or the pharmacies mapped or added by
@@ -292,6 +300,8 @@ export type MapData = {
   neighbourhoods: MapNeighbourhood[];
   /** Places this user has already surveyed: «settlement:<area_id>» / «hood:<osm_id>». */
   checked: string[];
+  /** Province-wide coverage and capacity, from `service_metric`. */
+  capacity: { key: string; value: number; note: string }[];
   user: { id: number; displayName: string; role: string };
   /** [index a, index b] into `settlements`. */
   edges: [number, number][];
@@ -441,6 +451,20 @@ export function loadMapData(): MapData {
   const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
   const r1 = (v: number) => Math.round(v * 10) / 10;
 
+  /* Capacity per settlement: how far the nearest pharmacy is, how many are within a walk,
+     the settlement's own built footprint, and what is left of its capacity. */
+  const cap = new Map<number, {
+    nearest_km: number | null; pharmacies_1500: number; footprint_km2: number | null;
+    density: number | null; supply: number; capacity: number; remaining: number;
+  }>();
+  for (const r of all<{ area_id: number; nearest_km: number | null; pharmacies_1500: number;
+    footprint_km2: number | null; density: number | null; supply: number; capacity: number;
+    remaining: number }>(
+      "SELECT area_id, nearest_km, pharmacies_1500, footprint_km2, density, supply, capacity, remaining FROM settlement_service",
+  )) {
+    cap.set(r.area_id, r);
+  }
+
   const settlements: MapSettlement[] = rows.map((r) => ({
     id: r.area_id,
     name: r.name,
@@ -463,6 +487,13 @@ export function loadMapData(): MapData {
     phLegal: r.pharmacy_legal,
     mapped: r.pharmacy_mapped,
     inFda: r.n_fda_rows > 0,
+    nearestKm: cap.get(r.area_id)?.nearest_km ?? null,
+    ph1500: cap.get(r.area_id)?.pharmacies_1500 ?? 0,
+    footprintKm2: cap.get(r.area_id)?.footprint_km2 ?? null,
+    density: cap.get(r.area_id)?.density ?? null,
+    capacity: cap.get(r.area_id)?.capacity ?? 0,
+    supply: cap.get(r.area_id)?.supply ?? 0,
+    remaining: cap.get(r.area_id)?.remaining ?? 0,
     straight: r1(r.straight_km),
     net: r.net_km === null ? null : r1(r.net_km),
     road: r.road_km === null ? null : r1(r.road_km),
@@ -832,6 +863,9 @@ export function loadMapData(): MapData {
     measurements,
     neighbourhoods,
     checked,
+    capacity: all<{ key: string; value: number; note: string }>(
+      "SELECT key, value, note FROM service_metric ORDER BY rowid",
+    ),
     user: { id: user.id, displayName: user.displayName, role: user.role },
     edges,
     cells,
