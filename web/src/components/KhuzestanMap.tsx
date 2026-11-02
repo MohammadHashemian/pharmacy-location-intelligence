@@ -3905,6 +3905,14 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             await fetch(`/api/surveys?id=${a.id}`, { method: "DELETE" });
             router.refresh();
           }}
+          onRename={async (a, name) => {
+            await fetch("/api/surveys", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: a.id, name }),
+            });
+            router.refresh();
+          }}
         />
 
         <ShortlistPanel

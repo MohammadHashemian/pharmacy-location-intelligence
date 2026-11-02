@@ -402,6 +402,18 @@ without touching the grid, and the map recolours:
 Ahvaz (1.2 M) is saturated and absent from the «room» ranking, the benchmark dial moves the
 saturated count 83 → 32 and back, and the map draws all four colours.
 
+### Renaming a surveyed area (PATCH `/api/surveys`)
+
+A typo used to cost the polygon: delete, walk the streets again, redraw. Every area row now
+carries a ✎ button (double-clicking the name works too) that swaps the label for an input —
+Enter saves, Escape cancels, and `points`, `area_km2` and `created_at` are untouched.
+
+The API had a PATCH from the start; nothing in the UI called it. Names are validated on both
+paths (۲–۱۲۰ chars, whitespace collapsed) so a rename cannot produce an unnamed polygon.
+
+`tools/test_survey_rename.py`: create an area, rename it, assert the database, the polygon and
+the area are right, Escape leaves it alone, a one-letter name returns 400.
+
 ### «بررسی شد» is a row in the database, per user (`/api/checks`)
 
 Two different things were being conflated, so both are now explicit:

@@ -114,8 +114,12 @@ export async function PATCH(req: Request) {
   const sets: string[] = [];
   const args: (string | number | null)[] = [];
   if (body.name !== undefined) {
+    const name = String(body.name).replace(/\s+/g, " ").trim();
+    if (name.length < 2 || name.length > 120) {
+      return NextResponse.json({ error: "نام باید بین ۲ تا ۱۲۰ نویسه باشد" }, { status: 400 });
+    }
     sets.push("name = ?");
-    args.push(String(body.name).trim());
+    args.push(name);
   }
   if (body.note !== undefined) {
     sets.push("note = ?");

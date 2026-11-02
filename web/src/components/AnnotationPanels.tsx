@@ -153,12 +153,26 @@ export function SurveyPanel({
   items,
   onFocus,
   onRemove,
+  onRename,
 }: {
   items: SurveyArea[];
   onFocus: (a: SurveyArea) => void;
   onRemove: (a: SurveyArea) => void;
+  onRename: (a: SurveyArea, name: string) => void;
 }) {
   const totalKm2 = items.reduce((s, a) => s + (a.areaKm2 ?? 0), 0);
+  /* rename in place: deleting and redrawing a polygon to fix a typo loses the shape */
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const start = (a: SurveyArea) => {
+    setEditing(a.id);
+    setDraft(a.name);
+  };
+  const commit = (a: SurveyArea) => {
+    const name = draft.replace(/ {2,}/g, " ").trim();
+    setEditing(null);
+    if (name.length >= 2 && name !== a.name) onRename(a, name);
+  };
   return (
     <div data-panel="survey" className="rounded-2xl border border-line bg-surface p-2.5">
       <div className="mb-1.5 flex items-center justify-between">
@@ -176,13 +190,40 @@ export function SurveyPanel({
         <ul className="max-h-40 space-y-1 overflow-auto">
           {items.map((a) => (
             <li key={a.id} className="flex items-center gap-1 rounded-lg border border-line/70 px-1.5 py-1">
+              {editing === a.id ? (
+                <input
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onBlur={() => commit(a)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commit(a);
+                    if (e.key === "Escape") setEditing(null);
+                  }}
+                  aria-label={`نام محدوده ${a.name}`}
+                  data-edit={`survey-${a.id}`}
+                  className="min-w-0 flex-1 rounded border border-brand/50 bg-surface px-1 py-0.5 text-[10.5px] text-ink outline-none"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onFocus(a)}
+                  onDoubleClick={() => start(a)}
+                  className="min-w-0 flex-1 text-right text-[10.5px] text-ink hover:text-brand-ink"
+                  title="نمایش روی نقشه · دوبار کلیک برای تغییر نام"
+                >
+                  <span className="block truncate">{a.name}</span>
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => onFocus(a)}
-                className="min-w-0 flex-1 text-right text-[10.5px] text-ink hover:text-brand-ink"
-                title="نمایش روی نقشه"
+                data-editbtn={`survey-${a.id}`}
+                onClick={() => start(a)}
+                className="shrink-0 rounded border border-line-strong px-1 text-[9px] text-muted hover:text-brand-ink"
+                title="تغییر نام"
+                aria-label={`تغییر نام ${a.name}`}
               >
-                <span className="block truncate">{a.name}</span>
+                ✎
               </button>
               <span className="tnum shrink-0 text-[9px] text-faint">
                 {num(a.areaKm2 ?? 0, 1)} کم²
