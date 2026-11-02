@@ -47,7 +47,13 @@ const RING_EDGES = [25, 50, 75, 100, 150, 200, 300];
    findable at 1x, then stop: at 8x a 14 px diamond covered the street detail and
    clusters of them merged into one blob. 9-10 px diameter is the size a map marker
    wants. */
-const pharmRadiusPx = (k: number) => 2.4 + Math.min(1.4, Math.log2(Math.max(1, k)) * 0.5);
+const pharmRadiusPx = (k: number) => {
+  const base = 2.4 + Math.min(1.4, Math.log2(Math.max(1, k)) * 0.5);
+  /* Above 12x you are looking for a shop, not a province: 7.6 px diamonds got lost
+     among the street lattice, which is exactly the «none of the pharmacies are
+     displayed» report from Golestan. */
+  return base + (k >= 12 ? Math.min(2.0, (k - 12) * 0.22) : 0);
+};
 const medRadiusPx = (k: number) => 2.2 + Math.min(1.2, Math.log2(Math.max(1, k)) * 0.44);
 
 const COLORS = {
@@ -1181,12 +1187,19 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     /* Greedy screen-space declutter: a marker is drawn only if no accepted marker
        is within one marker-width of it, otherwise it is folded into that marker's
        «+n». A lattice alone still let diagonal neighbours overlap. */
-    const gapPx = px * 1.9;
-    const gap = gapPx / view.k;
+    /* Merging is for the province and city views; at district zoom every shop must be
+       its own pin, otherwise a street of four pharmacies shows as «+3». */
+    const declutter = view.k < 13;
+    const gapPx = declutter ? px * 1.9 : 1;
+    const gap = declutter ? gapPx / view.k : 0;
     const buckets = new Map<string, { x: number; y: number; n: number; i: number }>();
     const grid = new Map<string, { x: number; y: number; n: number; i: number }[]>();
     const gkey = (x: number, y: number) => `${Math.floor(x * view.k / gapPx)}:${Math.floor(y * view.k / gapPx)}`;
     for (const p of scene.pharm) {
+      if (!declutter) {
+        buckets.set(`${p.i}`, { x: p.x, y: p.y, n: 1, i: p.i });
+        continue;
+      }
       let host: { x: number; y: number; n: number; i: number } | null = null;
       const gx = Math.floor((p.x * view.k) / gapPx);
       const gy = Math.floor((p.y * view.k) / gapPx);
@@ -1222,9 +1235,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             <path
               d={`M${b.x} ${b.y - r} L${b.x + r} ${b.y} L${b.x} ${b.y + r} L${b.x - r} ${b.y}Z`}
               fill={COLORS.pharmacy}
-              fillOpacity={0.95}
-              stroke="#ffffff"
-              strokeWidth={1}
+              fillOpacity={0.98}
+              stroke="#7c2d12"
+              strokeWidth={1.3}
               vectorEffect="non-scaling-stroke"
             />
             {b.n >= 3 && view.k >= 5 ? (
