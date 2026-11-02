@@ -371,6 +371,39 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Neighbourhoods are a layer now, not an exception list (`etl/import_neighbourhoods.py`)
+
+Reported: «کوت نواصر و کوی هادی در نقشه اسم‌گذاری نشدند». The cause was structural, not two
+missing rows: the label layer read `v_map_settlement`, the **administrative** layer (شهر /
+روستا). A محله is not an administrative unit, so every named neighbourhood was invisible —
+`geo_places` had been holding **312 of them** all along.
+
+```
+etl/import_neighbourhoods.py            →  map_neighbourhood (312 rows, city + distance)
+etl/neighbourhood_aliases.json          →  the name people use, where OSM differs
+```
+
+* labels draw from 5× as small purple names with a dot, decluttered in screen space
+  (26 px) so the city core does not become a word cloud;
+* `alias` wins the label slot, so «کوی هادی» is shown rather than the OSM string;
+* the search box searches them too and shows a «محله:» row of chips that fly to the point;
+* the map header counts them («۳۱۲ محله»).
+
+**The two reported places**
+
+| name | source | coordinates |
+|---|---|---|
+| کوت نواصر | `geo_places` (OSM neighbourhood); Google Places agrees within ~450 m | 31.2227, 48.6609 |
+| کوی هادی | alias of the OSM label «هادی آباد - کوت عبداله»; Google has «هادی آباد» at the same point | 31.2249, 48.6532 |
+
+The second is an **inferred alias**, not an independently surveyed point: no source we can
+reach names a separate «کوی هادی» node. It is recorded as an alias so it is findable and
+correctable — if the real extent differs, add a row to the aliases file rather than editing
+code.
+
+`tools/test_neighbourhoods.py` asserts the diagnosis (0 rows in `v_map_settlement`), the class
+fix (≥300 imported), both names present, both drawn at 17×, and searchable.
+
 ### Measuring an area, and what lives inside it (`/api/measure`)
 
 Draw a polygon → area, inhabited footprint, estimated population, density and the pharmacies

@@ -65,7 +65,7 @@ def main() -> int:
               "گزینه در سطح آبادی" in body and "پیشنهاد در سطح بلوک جمعیتی" in body)
 
         for name, tag, why in ((fda, "فید", "FDA register"), (mapped, "نقشه", "mapped only")):
-            pg.fill('input[placeholder="جستجوی نام، شهرستان، بخش یا دهستان…"]', name)
+            pg.fill('input[placeholder*="جستجوی نام"]', name)
             pg.wait_for_timeout(600)
             # scope to the settlement table: the shortlist comparison also contains names
             row = pg.locator('table:has(th:text("کمبود داروخانه")) tr', has_text=name).first

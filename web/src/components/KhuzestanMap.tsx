@@ -417,6 +417,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     prospects: true,
     surveys: true,
     measures: true,
+    hoods: true,
   });
   const [targetPerPharm, setTargetPerPharm] = useState(
     Math.round((data.meta.residentsPerPharmacy || 5400) / 100) * 100,
@@ -847,6 +848,18 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     }
     return out;
   }, [settlements, folded, query]);
+
+  const hoodHits = useMemo(() => {
+    const q = fold(query);
+    if (q.length < 2) return [];
+    const out = [];
+    for (const n of data.neighbourhoods) {
+      const hay = fold(`${n.name} ${n.alias ?? ""} ${n.city ?? ""}`);
+      if (hay.includes(q)) out.push(n);
+      if (out.length >= 6) break;
+    }
+    return out;
+  }, [data.neighbourhoods, query]);
 
   const stats = useMemo(() => {
     let pop = 0;
@@ -1515,6 +1528,64 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       </g>
     );
   }, [layers.surveys, data.surveys, scene, view.k]);
+
+  /* محله labels. The administrative layer knows شهر and روستا, not neighbourhoods — 312 of
+     them were invisible, including «کوت نواصر» and «کوی هادی». Drawn from 5x, under the
+     settlement labels so a city name still wins the eye. */
+  const neighbourhoodLayer = useMemo(() => {
+    if (!layers.hoods || view.k < 5) return null;
+    const box = visibleBox();
+    const out: { id: number; x: number; y: number; text: string }[] = [];
+    const taken: { sx: number; sy: number }[] = [];
+    /* Greedy screen-space declutter, same idea as the markers: a name is drawn only if no
+       accepted name sits within ~62 px, otherwise the city core turns into a word cloud.
+       Nearer-to-city-centre names win, so a neighbourhood keeps its label over a hamlet. */
+    const ordered = [...data.neighbourhoods].sort((a, b) => {
+      /* a curated alias is a name somebody bothered to record — it wins the slot */
+      const ai = a.alias ? 0 : 1;
+      const bi = b.alias ? 0 : 1;
+      if (ai !== bi) return ai - bi;
+      return (a.cityKm ?? 99) - (b.cityKm ?? 99);
+    });
+    for (const n of ordered) {
+      const [x, y] = scene.proj(n.lat, n.lon);
+      const sx = x * view.k + view.tx;
+      const sy = y * view.k + view.ty;
+      if (sx < box.x0 - 60 || sx > box.x1 + 60 || sy < box.y0 - 30 || sy > box.y1 + 30) continue;
+      if (taken.some((t) => Math.hypot(t.sx - sx, t.sy - sy) < 26)) continue;
+      taken.push({ sx, sy });
+      out.push({
+        id: n.osmId,
+        x,
+        y,
+        /* the alias is the name people use: show it instead of the OSM label, not beside it */
+        text: n.alias ?? n.name.split(" - ")[0],
+      });
+      if (out.length >= 180) break;          // a wall of names is not a map
+    }
+    return (
+      <g data-layer="hoods">
+        {out.map((n) => (
+          <g key={n.id} data-hood={n.id}>
+            <circle cx={n.x} cy={n.y} r={1.6 / view.k} fill="#7c3aed" opacity={0.75} />
+            <text
+              x={n.x}
+              y={n.y - 3 / view.k}
+              textAnchor="middle"
+              fontSize={7.4 / view.k}
+              fill="#5b21b6"
+              paintOrder="stroke"
+              stroke="#ffffff"
+              strokeWidth={2 / view.k}
+              pointerEvents="none"
+            >
+              {n.text}
+            </text>
+          </g>
+        ))}
+      </g>
+    );
+  }, [layers.hoods, data.neighbourhoods, scene, view.k, view.tx, view.ty]);
 
   const measureLayer = useMemo(() => {
     if (!layers.measures || !data.measurements.length) return null;
@@ -2355,6 +2426,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             <span className="whitespace-nowrap rounded-md border border-line-strong bg-surface-2 px-1.5 py-0.5 text-[10.5px] text-muted">
               {group(settlements.length)} نقطه · {group(scene.cells.length)} سلول مسکونی
             </span>
+            <span
+              className="whitespace-nowrap rounded-md border border-[#7c3aed]/30 bg-[#7c3aed]/10 px-1.5 py-0.5 text-[10.5px] text-[#5b21b6]"
+              title="محله‌ها واحد تقسیمات کشوری نیستند و در جدول آبادی‌ها نمی‌آیند"
+            >
+              {group(data.neighbourhoods.length)} محله
+            </span>
             <span className="flex-1" />
             {/* six checkboxes used to eat three wrapped rows; they live in one
                 popover now, and the toolbar stays a single line */}
@@ -2379,6 +2456,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     ["prospects", "فهرست بازدید"],
                     ["surveys", "محدوده‌های بررسی‌شده"],
                     ["measures", "مساحت‌های اندازه‌گیری‌شده"],
+                    ["hoods", "نام محله‌ها"],
                   ] as const
                 ).map(([id, label]) => (
                   <label
@@ -2843,6 +2921,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <g data-layer="pharmacy">{pharmacyLayer}</g>
               {surveyLayer}
               {measureLayer}
+              {neighbourhoodLayer}
               <g data-layer="sites">{siteLayer}</g>
               {prospectLayer}
 
@@ -4005,7 +4084,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="جستجوی نام، شهرستان، بخش یا دهستان…"
+              placeholder="جستجوی نام، محله، شهرستان، بخش یا دهستان…"
               className="w-56 rounded-lg border border-line-strong bg-surface-2 px-2 py-1 text-[11.5px] text-ink placeholder:text-faint"
             />
             <select
@@ -4057,6 +4136,23 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             </button>
           </div>
         </div>
+
+        {hoodHits.length ? (
+          <div className="mb-1 flex flex-wrap gap-1">
+            <span className="self-center text-[9.5px] text-faint">محله:</span>
+            {hoodHits.map((n) => (
+              <button
+                key={n.osmId}
+                type="button"
+                onClick={() => flyLatLon(n.lat, n.lon, 14)}
+                className="rounded-md border border-[#7c3aed]/30 bg-[#7c3aed]/10 px-1.5 py-0.5 text-[10.5px] text-[#5b21b6]"
+                title={`${n.city ?? ""}${n.county ? " · " + n.county : ""}`}
+              >
+                {n.alias ? `${n.name.split(" - ")[0]} (${n.alias})` : n.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {searchHits.length ? (
           <div className="mb-2 flex flex-wrap gap-1">

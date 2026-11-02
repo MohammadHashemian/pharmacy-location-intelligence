@@ -237,6 +237,19 @@ export type Prospect = {
   visitedAt: string | null;
 };
 
+/** A محله: not an administrative unit, so it lives outside `v_map_settlement`. */
+export type MapNeighbourhood = {
+  osmId: number;
+  name: string;
+  /** The name people actually use, when it differs from the OSM label. */
+  alias: string | null;
+  lat: number;
+  lon: number;
+  city: string | null;
+  county: string | null;
+  cityKm: number | null;
+};
+
 /** A measured polygon: area, how much of it is inhabited, and the people inside. */
 export type Measurement = {
   id: number;
@@ -269,6 +282,8 @@ export type MapData = {
   prospects: Prospect[];
   surveys: SurveyArea[];
   measurements: Measurement[];
+  /** Named neighbourhoods (محله) — 312 of them, invisible before this table existed. */
+  neighbourhoods: MapNeighbourhood[];
   user: { id: number; displayName: string; role: string };
   /** [index a, index b] into `settlements`. */
   edges: [number, number][];
@@ -681,6 +696,19 @@ export function loadMapData(): MapData {
         FROM measurement WHERE user_id = ? ORDER BY id DESC`, [user.id])
     .map((r) => ({ ...r, points: JSON.parse(r.points) as [number, number][] }));
 
+  run(`CREATE TABLE IF NOT EXISTS map_neighbourhood (
+    osm_id INTEGER PRIMARY KEY, name TEXT NOT NULL, alias TEXT, lat REAL NOT NULL,
+    lon REAL NOT NULL, city TEXT, county TEXT, city_km REAL, place TEXT)`);
+  const neighbourhoods: MapNeighbourhood[] = all<{
+    osmId: number; name: string; alias: string | null; lat: number; lon: number;
+    city: string | null; county: string | null; cityKm: number | null;
+  }>(`SELECT osm_id AS osmId, name, alias, lat, lon, city, county, city_km AS cityKm
+        FROM map_neighbourhood ORDER BY name`).map((r) => ({
+    ...r,
+    lat: Math.round(r.lat * 1e4) / 1e4,
+    lon: Math.round(r.lon * 1e4) / 1e4,
+  }));
+
   const imp = one<{
     built_at: string;
     reference_name: string;
@@ -775,6 +803,7 @@ export function loadMapData(): MapData {
     prospects,
     surveys,
     measurements,
+    neighbourhoods,
     user: { id: user.id, displayName: user.displayName, role: user.role },
     edges,
     cells,

@@ -63,7 +63,7 @@ FA = str.maketrans("۰۱۲۳۴۵۶۷۸۹٫−", "0123456789.-")
 
 def row_gap_on_page(pg, name: str) -> float:
     """The gap as the user sees it in the suggestions table (Persian digits and all)."""
-    pg.fill('input[placeholder="جستجوی نام، شهرستان، بخش یا دهستان…"]', name)
+    pg.fill('input[placeholder*="جستجوی نام"]', name)
     pg.wait_for_timeout(700)
     row = pg.locator("tr", has_text=name).first
     cells = [c.strip() for c in row.locator("td").all_inner_texts()]
