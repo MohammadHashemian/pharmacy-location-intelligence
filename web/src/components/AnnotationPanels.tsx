@@ -6,7 +6,7 @@
  * Both are scoped to the signed-in user's id (one seeded owner until auth exists), so the
  * work survives a reload and will survive multiple accounts when they arrive.
  */
-import type { Prospect, SurveyArea } from "@/lib/map";
+import type { Measurement, Prospect, SurveyArea } from "@/lib/map";
 import { group, num } from "@/lib/format";
 
 const STATUS: { id: Prospect["status"]; label: string; tone: string }[] = [
@@ -149,3 +149,109 @@ export function SurveyPanel({
 }
 
 export { nextStatus };
+
+
+/**
+ * Saved measurements, side by side — «کوی منتظری» against «کوت نواصر».
+ *
+ * The comparison is the point: an area number on its own says nothing about whether a
+ * pharmacy belongs there, but the same measure on two neighbourhoods does.
+ */
+export function MeasurePanel({
+  items,
+  onFocus,
+  onRemove,
+}: {
+  items: Measurement[];
+  onFocus: (m: Measurement) => void;
+  onRemove: (m: Measurement) => void;
+}) {
+  if (!items.length) {
+    return (
+      <div className="rounded-2xl border border-line bg-surface p-2.5">
+        <div className="text-[12px] font-semibold text-ink">مقایسهٔ مساحت‌ها</div>
+        <p className="mt-1 text-[10.5px] leading-5 text-muted">
+          با «اندازه‌گیری» دور یک محله خط بکشید تا مساحت، سطح مسکونی و جمعیت تخمینی‌اش را
+          ببینید؛ دو تا را که ذخیره کنید، کنار هم مقایسه می‌شوند.
+        </p>
+      </div>
+    );
+  }
+
+  const maxPop = Math.max(...items.map((m) => m.population), 1);
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-2.5">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-[12px] font-semibold text-ink">مقایسهٔ مساحت‌ها</span>
+        <span className="tnum text-[10px] text-faint">{group(items.length)} محدوده</span>
+      </div>
+      <div className="overflow-auto">
+        <table className="w-full border-collapse text-[10px]">
+          <thead>
+            <tr>
+              <th className="w-16 px-1 py-1 text-right font-medium text-faint">معیار</th>
+              {items.map((m) => (
+                <th key={m.id} className="px-1 py-1 text-left font-medium text-ink">
+                  <button
+                    type="button"
+                    onClick={() => onFocus(m)}
+                    className="w-full text-right hover:text-brand-ink"
+                    title="نمایش روی نقشه"
+                  >
+                    <span className="block truncate">{m.name}</span>
+                  </button>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(
+              [
+                ["مساحت", (m: Measurement) => num(m.areaKm2, 2), "km²"],
+                ["مسکونی", (m: Measurement) => num(m.residentialKm2, 2), "km²"],
+                ["جمعیت", (m: Measurement) => group(m.population), ""],
+                ["تراکم", (m: Measurement) => group(m.density), "/km²"],
+                ["داروخانه", (m: Measurement) => group(m.pharmacies), ""],
+              ] as const
+            ).map(([label, f, unit]) => (
+              <tr key={label} className="border-t border-line/60">
+                <td className="px-1 py-0.5 text-faint">{label}</td>
+                {items.map((m) => (
+                  <td key={m.id} className="tnum px-1 py-0.5 text-left text-ink-soft">
+                    {f(m)}
+                    {unit ? <span className="text-[8px] text-faint"> {unit}</span> : null}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            <tr className="border-t border-line/60">
+              <td className="px-1 py-0.5 text-faint">سهم جمعیت</td>
+              {items.map((m) => (
+                <td key={m.id} className="px-1 py-0.5">
+                  <span className="block h-1.5 rounded-full bg-brand/70"
+                        style={{ width: `${Math.round((m.population / maxPop) * 100)}%` }} />
+                </td>
+              ))}
+            </tr>
+            <tr className="border-t border-line/60">
+              <td className="px-1 py-0.5" />
+              {items.map((m) => (
+                <td key={m.id} className="px-1 py-0.5 text-left">
+                  <button
+                    type="button"
+                    data-del={`measure-${m.id}`}
+                    onClick={() => onRemove(m)}
+                    className="rounded border border-line-strong px-1 text-[9px] text-danger hover:border-danger"
+                  >
+                    حذف
+                  </button>
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

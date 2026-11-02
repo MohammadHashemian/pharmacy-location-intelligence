@@ -34,7 +34,7 @@ import type { MapCell, MapData, MapSettlement, MapShape } from "@/lib/map";
 import { group, num, shortCounty, toPersianDigits } from "@/lib/format";
 import { PlacePanel } from "@/components/PharmacyPanel";
 import { ShortlistPanel } from "@/components/ShortlistPanel";
-import { VisitPanel, SurveyPanel, nextStatus } from "@/components/AnnotationPanels";
+import { VisitPanel, SurveyPanel, MeasurePanel, nextStatus } from "@/components/AnnotationPanels";
 
 const W = 660;
 const H = 820;
@@ -416,6 +416,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     sites: true,
     prospects: true,
     surveys: true,
+    measures: true,
   });
   const [targetPerPharm, setTargetPerPharm] = useState(
     Math.round((data.meta.residentsPerPharmacy || 5400) / 100) * 100,
@@ -715,6 +716,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const [markPriority, setMarkPriority] = useState(2);
   const [markBusy, setMarkBusy] = useState(false);
   const [drawMode, setDrawMode] = useState(false);
+  /** «survey» records ground already walked; «measure» answers «how big is this, and how
+   *  many people live here» — the same gesture, a different question. */
+  const [drawKind, setDrawKind] = useState<"survey" | "measure">("survey");
+  const [measure, setMeasure] = useState<{
+    areaKm2: number; residentialKm2: number; population: number; density: number;
+    pharmacies: number; method: string;
+  } | null>(null);
   const [drawPts, setDrawPts] = useState<[number, number][]>([]);
   const [drawName, setDrawName] = useState("");
   const [drawBusy, setDrawBusy] = useState(false);
@@ -1208,6 +1216,28 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     }
   }, [mode, radius, targetPerPharm, selSite]);
 
+  useEffect(() => {
+    if (drawKind !== "measure" || drawPts.length < 3) {
+      if (drawKind === "measure") setMeasure(null);
+      return;
+    }
+    let alive = true;
+    const t = window.setTimeout(async () => {
+      const j = (await fetch("/api/measure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ points: drawPts }),
+      })
+        .then((r) => r.json())
+        .catch(() => null)) as { metrics?: typeof measure } | null;
+      if (alive && j?.metrics) setMeasure(j.metrics);
+    }, 350);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+    };
+  }, [drawKind, drawPts]);
+
   const refreshSoon = () => {
     router.refresh();
     let tries = 0;
@@ -1485,6 +1515,32 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       </g>
     );
   }, [layers.surveys, data.surveys, scene, view.k]);
+
+  const measureLayer = useMemo(() => {
+    if (!layers.measures || !data.measurements.length) return null;
+    return (
+      <g data-layer="measures">
+        {data.measurements.map((m) => {
+          const pts = m.points.map(([la, lo]) => scene.proj(la, lo));
+          if (pts.length < 3) return null;
+          const d = `M${pts.map(([x, y]) => `${x} ${y}`).join(" L")} Z`;
+          const cx = pts.reduce((t, p) => t + p[0], 0) / pts.length;
+          const cy = pts.reduce((t, p) => t + p[1], 0) / pts.length;
+          return (
+            <g key={m.id} data-measure={m.id}>
+              <path d={d} fill="#f59e0b" fillOpacity={0.12} stroke="#b45309"
+                    strokeWidth={2 / view.k} strokeDasharray={`${2 / view.k} ${5 / view.k}`} />
+              <text x={cx} y={cy} textAnchor="middle" fontSize={9 / view.k} fontWeight={700}
+                    fill="#92400e" paintOrder="stroke" stroke="#ffffff"
+                    strokeWidth={2.4 / view.k} pointerEvents="none">
+                {`${m.name} · ${m.areaKm2.toFixed(2)} کم²`}
+              </text>
+            </g>
+          );
+        })}
+      </g>
+    );
+  }, [layers.measures, data.measurements, scene, view.k]);
 
   const prospectLayer = useMemo(() => {
     if (!layers.prospects || !data.prospects.length) return null;
@@ -2322,6 +2378,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     ["sites", "پیشنهادهای مکانی"],
                     ["prospects", "فهرست بازدید"],
                     ["surveys", "محدوده‌های بررسی‌شده"],
+                    ["measures", "مساحت‌های اندازه‌گیری‌شده"],
                   ] as const
                 ).map(([id, label]) => (
                   <label
@@ -2491,9 +2548,32 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             </button>
             <button
               type="button"
+              aria-label="اندازه‌گیری مساحت"
+              onClick={() => {
+                setDrawMode(true);
+                setDrawKind("measure");
+                setDrawPts([]);
+                setDrawName("");
+                setMeasure(null);
+                setMarkMode(false);
+                setAddMode(false);
+                setProbeMode(false);
+              }}
+              title="مساحت را بکشید تا اندازه و جمعیت تخمینی‌اش را ببینید"
+              className={`shrink-0 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition ${
+                drawMode && drawKind === "measure"
+                  ? "border-warn/50 bg-warn-soft text-warn"
+                  : "border-line bg-surface text-muted hover:text-ink"
+              }`}
+            >
+              {drawMode && drawKind === "measure" ? `${drawPts.length} نقطه…` : "اندازه‌گیری"}
+            </button>
+            <button
+              type="button"
               aria-label="کشیدن محدوده"
               onClick={() => {
                 setDrawMode((v) => !v);
+                setDrawKind("survey");
                 setDrawPts([]);
                 setDrawName("");
                 setMarkMode(false);
@@ -2762,6 +2842,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <g data-layer="medical">{medicalLayer}</g>
               <g data-layer="pharmacy">{pharmacyLayer}</g>
               {surveyLayer}
+              {measureLayer}
               <g data-layer="sites">{siteLayer}</g>
               {prospectLayer}
 
@@ -3109,7 +3190,89 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             </div>
           ) : null}
 
-          {drawMode ? (
+          {drawMode && drawKind === "measure" ? (
+            <div className="absolute bottom-2 right-2 z-30 w-[290px] max-w-[88vw] rounded-xl border border-warn/40 bg-surface p-2.5 text-[11px] shadow-xl">
+              <div className="flex items-center justify-between gap-2">
+                <b className="text-[12px] text-ink">اندازه‌گیری مساحت</b>
+                <span className="tnum text-[9.5px] text-faint">{drawPts.length} نقطه</span>
+              </div>
+              {drawPts.length < 3 ? (
+                <p className="mt-1 text-[10px] leading-4 text-muted">
+                  روی نقشه کلیک کنید تا گوشه‌ها را ببندید؛ از سه نقطه به بعد اندازه و جمعیت
+                  تخمینی محاسبه می‌شود.
+                </p>
+              ) : measure ? (
+                <div className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10.5px]">
+                  <span className="text-faint">مساحت کل</span>
+                  <span className="tnum text-left font-bold text-ink">{num(measure.areaKm2, 2)} کم²</span>
+                  <span className="text-faint">سطح مسکونی</span>
+                  <span className="tnum text-left text-ink-soft">{num(measure.residentialKm2, 2)} کم²</span>
+                  <span className="text-faint">جمعیت تخمینی</span>
+                  <span className="tnum text-left font-bold text-ink">{group(measure.population)}</span>
+                  <span className="text-faint">تراکم</span>
+                  <span className="tnum text-left text-ink-soft">{group(measure.density)} /کم²</span>
+                  <span className="text-faint">داروخانه داخل محدوده</span>
+                  <span className="tnum text-left text-ink-soft">{group(measure.pharmacies)}</span>
+                </div>
+              ) : (
+                <p className="mt-1 text-[10px] text-faint">محاسبه…</p>
+              )}
+              {measure ? (
+                <p className="mt-1 text-[9px] leading-3 text-faint">{measure.method}</p>
+              ) : null}
+              <input
+                value={drawName}
+                onChange={(e) => setDrawName(e.target.value)}
+                placeholder="نام محدوده (مثلاً کوی منتظری)"
+                className="mt-1.5 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11.5px] text-ink placeholder:text-faint"
+              />
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={drawBusy || !measure || drawName.trim().length < 2}
+                  onClick={async () => {
+                    setDrawBusy(true);
+                    await fetch("/api/measure", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ name: drawName, points: drawPts }),
+                    });
+                    setDrawBusy(false);
+                    setDrawPts([]);
+                    setDrawName("");
+                    setMeasure(null);
+                    setDrawMode(false);
+                    router.refresh();
+                  }}
+                  className="rounded-lg border border-warn bg-warn px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-40"
+                >
+                  {drawBusy ? "…" : "ذخیره برای مقایسه"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDrawPts((p) => p.slice(0, -1))}
+                  disabled={!drawPts.length}
+                  className="rounded-lg border border-line-strong bg-surface px-2 py-1 text-[11px] text-muted disabled:opacity-40"
+                >
+                  واگرد
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawPts([]);
+                    setDrawName("");
+                    setMeasure(null);
+                    setDrawMode(false);
+                  }}
+                  className="rounded-lg border border-line-strong bg-surface px-2 py-1 text-[11px] text-muted"
+                >
+                  بستن
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {drawMode && drawKind === "survey" ? (
             <div className="absolute bottom-2 right-2 z-30 w-[276px] max-w-[86vw] rounded-xl border border-[#0284c7]/40 bg-surface p-2.5 text-[11px] shadow-xl">
               <div className="flex items-center justify-between gap-2">
                 <b className="text-[12px] text-ink">محدودهٔ بررسی‌شده</b>
@@ -3508,6 +3671,19 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
       {/* --------------------------------------------------------- sidebar -- */}
       <div className="flex min-w-0 flex-col gap-3">
+        <MeasurePanel
+          items={data.measurements}
+          onFocus={(m) => {
+            const lat = m.points.reduce((t, p) => t + p[0], 0) / m.points.length;
+            const lon = m.points.reduce((t, p) => t + p[1], 0) / m.points.length;
+            flyLatLon(lat, lon, 14);
+          }}
+          onRemove={async (m) => {
+            await fetch(`/api/measure?id=${m.id}`, { method: "DELETE" });
+            router.refresh();
+          }}
+        />
+
         <VisitPanel
           items={data.prospects}
           onFocus={(p) => flyLatLon(p.lat, p.lon, 15)}

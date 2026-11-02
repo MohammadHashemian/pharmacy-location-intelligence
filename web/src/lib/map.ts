@@ -237,6 +237,19 @@ export type Prospect = {
   visitedAt: string | null;
 };
 
+/** A measured polygon: area, how much of it is inhabited, and the people inside. */
+export type Measurement = {
+  id: number;
+  name: string;
+  points: [number, number][];
+  areaKm2: number;
+  residentialKm2: number;
+  population: number;
+  density: number;
+  pharmacies: number;
+  cellKm: number;
+};
+
 /** A polygon the user has already walked — so the same streets are not surveyed twice. */
 export type SurveyArea = {
   id: number;
@@ -255,6 +268,7 @@ export type MapData = {
   /** This user's visit list and the areas they have already surveyed. */
   prospects: Prospect[];
   surveys: SurveyArea[];
+  measurements: Measurement[];
   user: { id: number; displayName: string; role: string };
   /** [index a, index b] into `settlements`. */
   edges: [number, number][];
@@ -653,6 +667,20 @@ export function loadMapData(): MapData {
         WHERE user_id = ? ORDER BY id DESC`, [user.id])
     .map((r) => ({ ...r, points: JSON.parse(r.points) as [number, number][] }));
 
+  run(`CREATE TABLE IF NOT EXISTS measurement (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL,
+    points TEXT NOT NULL, area_km2 REAL NOT NULL, residential_km2 REAL NOT NULL,
+    population INTEGER NOT NULL, density INTEGER NOT NULL, pharmacies INTEGER NOT NULL,
+    cell_km REAL NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+
+  const measurements: Measurement[] = all<{
+    id: number; name: string; points: string; areaKm2: number; residentialKm2: number;
+    population: number; density: number; pharmacies: number; cellKm: number;
+  }>(`SELECT id, name, points, area_km2 AS areaKm2, residential_km2 AS residentialKm2,
+             population, density, pharmacies, cell_km AS cellKm
+        FROM measurement WHERE user_id = ? ORDER BY id DESC`, [user.id])
+    .map((r) => ({ ...r, points: JSON.parse(r.points) as [number, number][] }));
+
   const imp = one<{
     built_at: string;
     reference_name: string;
@@ -746,6 +774,7 @@ export function loadMapData(): MapData {
     shortlist,
     prospects,
     surveys,
+    measurements,
     user: { id: user.id, displayName: user.displayName, role: user.role },
     edges,
     cells,

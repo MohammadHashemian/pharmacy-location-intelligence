@@ -371,6 +371,33 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Measuring an area, and what lives inside it (`/api/measure`)
+
+Draw a polygon → area, inhabited footprint, estimated population, density and the pharmacies
+inside it. Two of them side by side answer «کوی منتظری or کوت نواصر?» with numbers instead of
+impressions.
+
+**Where the population comes from** — the surfaces the map already trusts, finest first:
+
+| surface | cell | when |
+|---|---|---|
+| `urban_pop.json` | 0.25 km | inside the 86 cities that were built cell by cell |
+| `pop_province.json` | 0.5 km | the rest of the province |
+
+**Two mistakes worth recording**, both caught by testing rather than by looking:
+
+* «residential area» was cells × cell area, which gave **3.75 km² inside a 1 km² box** — the
+  population cells are not a regular lattice (they follow built-up discs). It is now the share
+  of a 100 m sample grid whose nearest cell is both populated **and close**: without the
+  distance test every sample found some cell somewhere and every polygon came back
+  «100 % residential». کوی منتظری: 0.94 of 1.52 km² built-up.
+* sampling area directly double-counted the boundary row and exceeded the polygon; the
+  footprint is now a **ratio of the measured area**, so it cannot.
+
+Arithmetic the test asserts: `density = population ÷ residential`, `residential ≤ area`,
+and a larger polygon contains more people. `tools/test_measure.py` draws both neighbourhoods
+through the browser, saves them, checks the comparison table and deletes one.
+
 ### Two things that belong to a person: places to visit, and ground already walked
 
 **Visit list** — `prospect` table, `POST/PATCH/DELETE /api/prospects`. Mark a spot on the map,
