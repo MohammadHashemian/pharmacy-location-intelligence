@@ -402,6 +402,17 @@ without touching the grid, and the map recolours:
 Ahvaz (1.2 M) is saturated and absent from the «room» ranking, the benchmark dial moves the
 saturated count 83 → 32 and back, and the map draws all four colours.
 
+### Population is a range, not a floor
+
+The candidate filter offered «هر جمعیتی / ≥ ۱٬۰۰۰ / ≥ ۵٬۰۰۰ / ≥ ۲۰٬۰۰۰» — a floor only, so the
+question that matters for a second-tier town — *«between 5,000 and 20,000 people»* — could not be
+asked. It is now two inputs, `از` and `تا`, either may be left empty, with a `×` to clear both.
+
+The ends cannot cross: typing a minimum above the maximum raises the maximum (and vice versa),
+so the list is never silently empty. `tools/test_pop_range.py` measures the window against the
+database (438 → 15 → 11 rows), removes a named row by lowering the ceiling under it, and checks
+that clearing restores the full list.
+
 ### «کجا جا هست» — the unmet-demand surface (`opportunity_cell`)
 
 The density choropleth answered the wrong question. It coloured *supply* — red where pharmacies

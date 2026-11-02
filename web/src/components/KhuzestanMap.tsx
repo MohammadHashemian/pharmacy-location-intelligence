@@ -374,6 +374,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
   const [radius, setRadius] = useState(60);
   const [minPop, setMinPop] = useState(0);
+  /* a ceiling as well as a floor: «شهرهای بین ۵ تا ۲۰ هزار نفر» is a question the old
+     single-threshold dropdown could not ask, and it is how you find second-tier towns. */
+  const [maxPop, setMaxPop] = useState(0);   // 0 = no ceiling
   const [onlyGap, setOnlyGap] = useState(false);
   const [sortBy, setSortBy] = useState<"dist" | "gap">("dist");
   const [query, setQuery] = useState("");
@@ -875,6 +878,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       const s = settlements[i];
       if (s.dist > radius) continue;
       if ((s.pop ?? 0) < minPop) continue;
+      if (maxPop > 0 && (s.pop ?? 0) > maxPop) continue;
       const gap = (s.pop ?? 0) / targetPerPharm - s.ph;
       if (onlyGap && gap < 1) continue;
       if (q) {
@@ -893,7 +897,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         : (a, b) => a.dist - b.dist,
     );
     return out;
-  }, [settlements, folded, radius, minPop, onlyGap, query, sortBy, targetPerPharm]);
+  }, [settlements, folded, radius, minPop, maxPop, onlyGap, query, sortBy, targetPerPharm]);
 
   const searchHits = useMemo(() => {
     const q = fold(query);
@@ -4416,16 +4420,48 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               placeholder="جستجوی نام، محله، شهرستان، بخش یا دهستان…"
               className="w-56 rounded-lg border border-line-strong bg-surface-2 px-2 py-1 text-[11.5px] text-ink placeholder:text-faint"
             />
-            <select
-              value={minPop}
-              onChange={(e) => setMinPop(Number(e.target.value))}
-              className="rounded-lg border border-line-strong bg-surface-2 px-1.5 py-1 text-[11px] text-ink"
-            >
-              <option value={0}>هر جمعیتی</option>
-              <option value={1000}>≥ ۱٬۰۰۰</option>
-              <option value={5000}>≥ ۵٬۰۰۰</option>
-              <option value={20000}>≥ ۲۰٬۰۰۰</option>
-            </select>
+            {/* population range: floor and ceiling, either may be empty */}
+            <div className="flex items-center gap-1 rounded-lg border border-line-strong bg-surface-2 px-1.5 py-1">
+              <span className="text-[10px] text-muted">جمعیت</span>
+              <input
+                value={minPop || ""}
+                onChange={(e) => {
+                  const v = Math.max(0, Number(e.target.value.replace(/[^0-9]/g, "")) || 0);
+                  setMinPop(v);
+                  if (maxPop > 0 && v > maxPop) setMaxPop(v);
+                }}
+                inputMode="numeric"
+                placeholder="از"
+                aria-label="کمینهٔ جمعیت"
+                data-range="pop-min"
+                className="w-14 bg-transparent text-center text-[11px] tabular-nums text-ink outline-none placeholder:text-faint"
+              />
+              <span className="text-[10px] text-faint">–</span>
+              <input
+                value={maxPop || ""}
+                onChange={(e) => {
+                  const v = Math.max(0, Number(e.target.value.replace(/[^0-9]/g, "")) || 0);
+                  setMaxPop(v);
+                  if (v > 0 && minPop > v) setMinPop(v);
+                }}
+                inputMode="numeric"
+                placeholder="تا"
+                aria-label="بیشینهٔ جمعیت"
+                data-range="pop-max"
+                className="w-14 bg-transparent text-center text-[11px] tabular-nums text-ink outline-none placeholder:text-faint"
+              />
+              {(minPop || maxPop) ? (
+                <button
+                  type="button"
+                  data-range="pop-clear"
+                  onClick={() => { setMinPop(0); setMaxPop(0); }}
+                  className="text-[10px] text-muted hover:text-danger"
+                  title="پاک کردن محدودهٔ جمعیت"
+                >
+                  ×
+                </button>
+              ) : null}
+            </div>
             <label className="flex items-center gap-1 rounded-lg border border-line bg-surface px-2 py-1 text-[11px] text-muted">
               <input
                 type="checkbox"
@@ -4499,7 +4535,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         ) : null}
 
         <div className="max-h-[420px] overflow-auto rounded-lg border border-line [scrollbar-gutter:stable]">
-          <table className="w-full min-w-[720px] border-collapse text-[11px]">
+          <table data-table="candidates" className="w-full min-w-[720px] border-collapse text-[11px]">
             <thead className="sticky top-0 z-1 bg-surface-2 text-muted">
               <tr>
                 <th className="px-2 py-1.5 text-right font-medium">نام</th>
