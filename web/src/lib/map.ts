@@ -201,12 +201,35 @@ export type SiteCandidate = {
   roadKm: number;
   gap: number;
   reason: string;
+  /** Score if a competitor opens next door and the population estimate is off by a fifth. */
+  scoreLow: number;
+  scoreHigh: number;
+};
+
+/** A shortlisted candidate, with the score it had when it was saved. */
+export type ShortlistItem = {
+  id: number;
+  rank: number;
+  lat: number;
+  lon: number;
+  settlement: string | null;
+  county: string | null;
+  score: number;
+  demand: number;
+  supplyMapped: number;
+  anchors: number;
+  roadKm: number;
+  gap: number;
+  note: string | null;
+  snapshotAt: string;
 };
 
 export type MapData = {
   settlements: MapSettlement[];
   /** Ranked places to open a pharmacy (`etl/rank_sites.py`). Empty until it has run. */
   sites: SiteCandidate[];
+  /** Places the user is actually comparing; metrics are the ones saved with the row. */
+  shortlist: ShortlistItem[];
   /** [index a, index b] into `settlements`. */
   edges: [number, number][];
   cells: MapCell[];
@@ -423,9 +446,11 @@ export function loadMapData(): MapData {
       rank: number; score: number; lat: number; lon: number; settlement: string | null;
       settle_km: number; county: string | null; demand: number; demand_km2: number; supply_mapped: number;
       supply_expected: number; anchors: number; road_km: number; gap: number; reason: string;
+      score_low: number | null; score_high: number | null;
     }>(
       `SELECT rank, score, lat, lon, settlement, settle_km, county, demand, demand_km2,
-              supply_mapped, supply_expected, anchors, road_km, gap, reason
+              supply_mapped, supply_expected, anchors, road_km, gap, reason,
+              score_low, score_high
          FROM site_candidate ORDER BY rank`,
     ).map((r) => ({
       rank: r.rank, score: r.score, lat: r.lat, lon: r.lon,
@@ -433,6 +458,7 @@ export function loadMapData(): MapData {
       demandKm2: r.demand_km2, supplyMapped: r.supply_mapped,
       supplyExpected: r.supply_expected, anchors: r.anchors, roadKm: r.road_km,
       gap: r.gap, reason: r.reason,
+    scoreLow: r.score_low ?? r.score, scoreHigh: r.score_high ?? r.score,
     }));
   } catch {
     sites = [];
@@ -547,6 +573,36 @@ export function loadMapData(): MapData {
     county: m.county,
   }));
 
+  run(`CREATE TABLE IF NOT EXISTS shortlist (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    rank          INTEGER NOT NULL,
+    lat           REAL NOT NULL,
+    lon           REAL NOT NULL,
+    settlement    TEXT,
+    county        TEXT,
+    score         REAL NOT NULL,
+    demand        REAL NOT NULL,
+    supply_mapped REAL NOT NULL,
+    anchors       REAL NOT NULL,
+    road_km       REAL NOT NULL,
+    gap           REAL NOT NULL,
+    note          TEXT,
+    snapshot_at   TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  const shortlist: ShortlistItem[] = all<{
+    id: number; rank: number; lat: number; lon: number; settlement: string | null;
+    county: string | null; score: number; demand: number; supplyMapped: number; anchors: number;
+    roadKm: number; gap: number; note: string | null; snapshotAt: string;
+  }>(`SELECT id, rank, lat, lon, settlement, county, score, demand,
+             supply_mapped AS supplyMapped, anchors, road_km AS roadKm, gap,
+             note, snapshot_at AS snapshotAt
+        FROM shortlist ORDER BY id DESC`).map((r) => ({
+    ...r,
+    lat: Math.round(r.lat * 1e4) / 1e4,
+    lon: Math.round(r.lon * 1e4) / 1e4,
+  }));
+
   const imp = one<{
     built_at: string;
     reference_name: string;
@@ -637,6 +693,7 @@ export function loadMapData(): MapData {
   return {
     settlements,
     sites,
+    shortlist,
     edges,
     cells,
     pharmacies,

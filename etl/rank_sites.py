@@ -219,10 +219,43 @@ def main() -> int:
 
     n_gap, n_anchor = norm("gap"), norm("anchors")
     n_access, n_density = norm("access"), norm("density")
+
+    def score_at(cand: dict, gap_v: float, dens_v: float, anchor_v: float) -> float:
+        """The same weighted sum, with one input changed — a sensitivity, not a new model.
+        Normalisation stays anchored to the real distribution on purpose: re-normalising
+        for every what-if would move all 111 rows and hide the effect we are measuring."""
+        i = id(cand)
+
+        def clip(x: float, key: str, norms: dict[int, float]) -> float:
+            vals = sorted(c[key] for c in candidates)
+            lo, hi = vals[int(len(vals) * 0.05)], vals[int(len(vals) * 0.95)]
+            span = max(1e-9, hi - lo)
+            return max(0.0, min(1.0, (x - lo) / span))
+
+        return (0.45 * clip(gap_v, "gap", n_gap) + 0.25 * clip(anchor_v, "anchors", n_anchor)
+                + 0.15 * clip(dens_v, "density", n_density) + 0.15 * n_access[i])
+
     for cand in candidates:
         i = id(cand)
+        supply = cand["supply_mapped"] + 0.85 * cand["supply_expected"]
         cand["score"] = (0.45 * n_gap[i] + 0.25 * n_anchor[i]
                          + 0.15 * n_density[i] + 0.15 * n_access[i])
+        # what the score becomes if we are wrong in the two ways that actually happen:
+        # one more competitor opens, and the population estimate is off by a fifth
+        cand["score_low"] = score_at(
+            cand,
+            cand["demand"] / max(0.6, supply + 1.0),          # a competitor opens next door
+            cand["demand"] / (math.pi * RADIUS_KM ** 2),
+            max(0.0, cand["anchors"] - 1.0),
+        )
+        cand["score_high"] = score_at(
+            cand,
+            cand["demand"] * 1.2 / max(0.6, supply),           # population under-estimated
+            cand["demand"] * 1.2 / (math.pi * RADIUS_KM ** 2),
+            cand["anchors"] + 1.0,
+        )
+        cand["score_low"] = min(cand["score_low"], cand["score"])
+        cand["score_high"] = max(cand["score_high"], cand["score"])
 
     # Snap each candidate to the population peak of its own catchment. The score is
     # computed for the area, but the pin has to stand where the houses are: a badge
@@ -260,7 +293,7 @@ def main() -> int:
         rank INTEGER, score REAL, lat REAL, lon REAL,
         settlement TEXT, settle_km REAL, county TEXT, demand REAL, demand_km2 REAL,
         supply_mapped REAL, supply_expected REAL, anchors REAL, road_km REAL,
-        gap REAL, reason TEXT,
+        gap REAL, reason TEXT, score_low REAL, score_high REAL,
         generated_at TEXT DEFAULT (datetime('now'))
     )""")
     c.execute("DELETE FROM site_candidate")
@@ -271,10 +304,11 @@ def main() -> int:
             f"{cand['anchors']:.1f} امتیاز درمانی · {cand['road_km']:.0f} کم از اهواز"
         )
         c.execute("""INSERT INTO site_candidate
-            (rank, score, lat, lon, settlement, settle_km, county, demand, demand_km2,
-             supply_mapped, supply_expected, anchors, road_km, gap, reason)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (i, round(cand["score"], 4), round(cand["lat"], 5), round(cand["lon"], 5),
+            (rank, score, score_low, score_high, lat, lon, settlement, settle_km, county,
+             demand, demand_km2, supply_mapped, supply_expected, anchors, road_km, gap, reason)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (i, round(cand["score"], 4), round(cand["score_low"], 4),
+             round(cand["score_high"], 4), round(cand["lat"], 5), round(cand["lon"], 5),
              cand["settlement"], round(cand["settle_km"], 2), cand["county"], round(cand["demand"]),
              round(cand["density"], 1), cand["supply_mapped"],
              round(cand["supply_expected"], 1), round(cand["anchors"], 2),

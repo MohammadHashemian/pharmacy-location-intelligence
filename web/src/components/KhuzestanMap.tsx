@@ -33,6 +33,7 @@ import {
 import type { MapCell, MapData, MapSettlement, MapShape } from "@/lib/map";
 import { group, num, shortCounty, toPersianDigits } from "@/lib/format";
 import { PlacePanel } from "@/components/PharmacyPanel";
+import { ShortlistPanel } from "@/components/ShortlistPanel";
 
 const W = 660;
 const H = 820;
@@ -375,6 +376,19 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       const i = data.medical.findIndex((m) => String(m.id) === mid);
       if (i >= 0) setSelMed(i);
     }
+    /* mode, radius, target and the open candidate travel too: a recommendation you cannot
+       send to a partner is half a decision. */
+    const m = q.get("m");
+    if (m === "gap" || m === "ratio" || m === "dens") {
+      setMode(m);
+      setLayers((l) => ({ ...l, density: true }));
+    }
+    const rr = Number(q.get("r"));
+    if (Number.isFinite(rr) && rr > 0) setRadius(Math.min(300, rr));
+    const tt = Number(q.get("t"));
+    if (Number.isFinite(tt) && tt > 0) setTargetPerPharm(Math.round(tt));
+    const sr = Number(q.get("site"));
+    if (Number.isInteger(sr) && sr > 0) setSelSite(sr);
   }, [data.pharmacies, data.medical]);
   const [selMed, setSelMed] = useState<number | null>(null);
   const [hoverMed, setHoverMed] = useState<{ i: number; x: number; y: number } | null>(null);
@@ -1155,6 +1169,30 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       Math.sin(dp / 2) ** 2 + Math.cos(rad(alat)) * Math.cos(rad(blat)) * Math.sin(dl / 2) ** 2;
     return 2 * R * Math.asin(Math.sqrt(h));
   };
+
+  /** Mirror the decision state into the address bar, without a navigation. */
+  const urlSynced = useRef(false);
+  useEffect(() => {
+    /* first pass is the hydrated state arriving from the URL itself — rewriting it there
+       would replace the parameters we were opened with by the defaults they override */
+    if (!urlSynced.current) {
+      urlSynced.current = true;
+      return;
+    }
+    const q = new URLSearchParams(window.location.search);
+    const set = (k: string, v: string | null) => {
+      if (v === null || v === "") q.delete(k);
+      else q.set(k, v);
+    };
+    set("m", mode);
+    set("r", radius === 60 ? null : String(radius));
+    set("t", String(targetPerPharm));
+    set("site", selSite === null ? null : String(selSite));
+    const next = `${window.location.pathname}?${q.toString()}`;
+    if (next !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(null, "", next);
+    }
+  }, [mode, radius, targetPerPharm, selSite]);
 
   const refreshSoon = () => {
     router.refresh();
@@ -2736,6 +2774,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 </div>
                 <div className="mt-0.5 text-[10.5px] text-muted">
                   {site.county ?? ""} · امتیاز {site.score.toFixed(2)}
+                  {site.scoreHigh > site.scoreLow + 0.005 ? (
+                    <span className="tnum text-faint" title="بازه: یک رقیب تازه باز شود و جمعیت ۲۰٪ خطا داشته باشد">
+                      {" "}
+                      ({site.scoreLow.toFixed(2)}–{site.scoreHigh.toFixed(2)})
+                    </span>
+                  ) : null}
                 </div>
                 {/* the ranking already writes this sentence — it was never shown */}
                 <p className="mt-1 rounded bg-surface-2 px-1.5 py-1 text-[10px] leading-4 text-ink-soft">
@@ -2776,7 +2820,21 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     </div>
                   );
                 })()}
-                <div className="mt-1.5 flex gap-1.5">
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await fetch("/api/shortlist", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ rank: site.rank }),
+                      });
+                      router.refresh();
+                    }}
+                    className="rounded-lg border border-brand bg-brand-soft px-2 py-1 text-[10.5px] font-medium text-brand-ink"
+                  >
+                    افزودن به فهرست
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -3140,6 +3198,18 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
       {/* --------------------------------------------------------- sidebar -- */}
       <div className="flex min-w-0 flex-col gap-3">
+        <ShortlistPanel
+          items={data.shortlist}
+          onRemove={async (id) => {
+            await fetch(`/api/shortlist?id=${id}`, { method: "DELETE" });
+            router.refresh();
+          }}
+          onFocus={(it) => {
+            setSelSite(it.rank);
+            flyLatLon(it.lat, it.lon, 14);
+          }}
+        />
+
         <PlacePanel
           key={`${selPharm ?? "x"}-${selMed ?? "x"}`}
           pharm={selPharm !== null ? data.pharmacies[selPharm] : null}
