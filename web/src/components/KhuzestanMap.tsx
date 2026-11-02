@@ -1243,10 +1243,30 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             data-lat={data.pharmacies[b.i]?.lat}
             data-lon={data.pharmacies[b.i]?.lon}
             data-merged={b.n}
+            data-shape={data.pharmacies[b.i]?.source === "manual" ? "manual" : "fetched"}
           >
             {/* An OSM pharmacy with no name is probably real — somebody mapped the shop
                 but not its sign. Kept on the map so the count stays honest, drawn hollow
                 and dashed so it is never mistaken for a verified point. */}
+            {data.pharmacies[b.i]?.source === "manual" ? (
+              /* a pin somebody placed by hand — a different shape from every fetched
+                 point, so «I added this» is readable at a glance */
+              <g>
+                <path
+                  /* a hair larger than the diamonds: at city zoom the silhouette has to
+                     win against 430 identical neighbours */
+                  d={`M${b.x} ${b.y + r * 1.35}
+                      C${b.x - r * 1.18} ${b.y + r * 0.05} ${b.x - r * 1.18} ${b.y - r * 1.1} ${b.x} ${b.y - r * 1.1}
+                      C${b.x + r * 1.18} ${b.y - r * 1.1} ${b.x + r * 1.18} ${b.y + r * 0.05} ${b.x} ${b.y + r * 1.35}Z`}
+                  fill="#4338ca"
+                  /* indigo on dark imagery needs a light rim, same rule the streets use */
+                  stroke={layers.sat ? "#ffffff" : "#1e1b4b"}
+                  strokeWidth={1.4}
+                  vectorEffect="non-scaling-stroke"
+                />
+                <circle cx={b.x} cy={b.y - r * 0.32} r={r * 0.4} fill="#ffffff" />
+              </g>
+            ) : (
             <path
               d={`M${b.x} ${b.y - r} L${b.x + r} ${b.y} L${b.x} ${b.y + r} L${b.x - r} ${b.y}Z`}
               /* hollow white on a pale basemap is invisible — the unnamed pin is a pale
@@ -1259,6 +1279,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               strokeDasharray={data.pharmacies[b.i]?.unnamed ? `${2.2 / view.k} ${1.6 / view.k}` : undefined}
               vectorEffect="non-scaling-stroke"
             />
+            )}
             {data.pharmacies[b.i]?.unnamed && view.k >= 10 ? (
               <text
                 x={b.x}
@@ -2995,6 +3016,17 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           <span className="flex items-center gap-1">
             <span className="text-[11px] font-bold text-[#7c3aed]">✚</span>
             پزشک / کلینیک / بیمارستان
+          </span>
+          <span className="flex items-center gap-1">
+            <svg width="11" height="13" viewBox="0 0 11 13" aria-hidden>
+              <path
+                d="M5.5 12.4C2.2 9.6 0.6 7.4 0.6 4.9a4.9 4.9 0 0 1 9.8 0c0 2.5-1.6 4.7-4.9 7.5Z"
+                fill="#4338ca"
+                stroke="#1e1b4b"
+              />
+              <circle cx="5.5" cy="4.9" r="1.7" fill="#fff" />
+            </svg>
+            داروخانهٔ دست‌افزوده (سنجاق)
           </span>
           <span className="flex items-center gap-1">
             <span className="h-2 w-2 rounded-full" style={{ background: COLORS.reference }} />

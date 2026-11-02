@@ -371,6 +371,18 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### A hand-added pharmacy is a pin, not a diamond
+
+Every fetched pharmacy is an orange diamond. A pharmacy **you** placed is an **indigo
+teardrop pin** with a white core — three independent cues at once (hue, silhouette, inner
+dot), so it reads in a cluster of 400 orange markers instead of depending on foveal
+inspection. Over imagery the pin takes a white rim, the same rule the street casing follows.
+
+Legend: «داروخانهٔ دست‌افزوده (سنجاق)» next to the fetched-pharmacy entry.
+
+Measured: 436 pharmacy markers at 16x — 433 diamonds, 3 pins, each tagged
+`data-shape="fetched" | "manual"` so a test can assert the split without reading pixels.
+
 ### Unnamed pharmacies: kept, marked, and reviewable
 
 Twelve OSM nodes carry `amenity=pharmacy` and no name. Dropping them would quietly
