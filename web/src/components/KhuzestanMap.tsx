@@ -479,6 +479,15 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  /** Screen-constant font size in SVG user units.
+   *
+   *  Text is drawn in scene units and counter-scaled by the zoom — but that only holds
+   *  while the SVG renders at its natural size. In full screen the viewBox is stretched
+   *  across the screen, so `12 / k` units became 2-3x that many pixels and the labels
+   *  grew until they collided. Dividing by `unitsPerPx` too keeps a 12 px label 12 px
+   *  at any zoom, in any container. */
+  const fs = (px: number) => (px * unitsPerPx) / view.k;
+
   const drag = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
   /** Names that occur more than once in the province — their label needs the
@@ -1342,12 +1351,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 <text
                   x={p.x + r * 1.5}
                   y={p.y - r * 1.2}
-                  fontSize={11 / view.k}
+                  fontSize={fs(11)}
                   fontWeight={700}
                   fill="#15803d"
                   paintOrder="stroke"
                   stroke="#ffffff"
-                  strokeWidth={2 / view.k}
+                  strokeWidth={(2 * unitsPerPx) / view.k}
                   pointerEvents="none"
                 >
                   ✓
@@ -1462,7 +1471,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <text
                 x={b.x}
                 y={b.y + r * 0.55}
-                fontSize={7 / view.k}
+                fontSize={fs(7)}
                 fontWeight={700}
                 textAnchor="middle"
                 fill="#7c2d12"
@@ -1475,12 +1484,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <text
                 x={b.x + r * 1.1}
                 y={b.y - r * 0.9}
-                fontSize={7.5 / view.k}
+                fontSize={fs(7.5)}
                 fontWeight={700}
                 fill="#7c2d12"
                 paintOrder="stroke"
                 stroke="#ffffff"
-                strokeWidth={2.4 / view.k}
+                strokeWidth={(2.4 * unitsPerPx) / view.k}
                 strokeOpacity={0.9}
               >
                 {`+${b.n - 1}`}
@@ -1490,7 +1499,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         ))}
       </g>
     );
-  }, [scene, layers.osm, view.k, onlyUnnamed, data.pharmacies, checkedSet]);
+  }, [scene, layers.osm, view.k, onlyUnnamed, data.pharmacies, checkedSet, unitsPerPx]);
 
   /* Demand side: clinics, doctors, dentists, hospitals, labs. Violet so it never
      reads as a pharmacy, and a plus sign for the ones that write prescriptions. */
@@ -1562,10 +1571,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             <g key={a.id} data-survey={a.id}>
               <path d={d} fill="#0ea5e9" fillOpacity={0.16} stroke="none" />
               <path d={d} fill="url(#surveyHatch)" stroke="#0369a1"
-                    strokeWidth={2.4 / view.k} strokeDasharray={`${7 / view.k} ${4 / view.k}`} />
-              <text x={cx} y={cy} textAnchor="middle" fontSize={10 / view.k} fontWeight={700}
+                    strokeWidth={(2.4 * unitsPerPx) / view.k} strokeDasharray={`${7 / view.k} ${4 / view.k}`} />
+              <text x={cx} y={cy} textAnchor="middle" fontSize={fs(10)} fontWeight={700}
                     fill="#075985" paintOrder="stroke" stroke="#ffffff"
-                    strokeWidth={2.2 / view.k} pointerEvents="none">
+                    strokeWidth={(2.2 * unitsPerPx) / view.k} pointerEvents="none">
                 {a.name}
               </text>
             </g>
@@ -1573,16 +1582,27 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         })}
       </g>
     );
-  }, [layers.surveys, data.surveys, scene, view.k]);
+  }, [layers.surveys, data.surveys, scene, view.k, unitsPerPx]);
 
   /* محله labels. The administrative layer knows شهر and روستا, not neighbourhoods — 312 of
      them were invisible, including «کوت نواصر» and «کوی هادی». Drawn from 5x, under the
      settlement labels so a city name still wins the eye. */
   const neighbourhoodLayer = useMemo(() => {
-    if (!layers.hoods || view.k < 5) return null;
+    /* from 8x: below that a محله name is a dot with a word on it, and there are 105 of
+       them around اهواز alone */
+    if (!layers.hoods || view.k < 8) return null;
     const box = visibleBox();
     const out: { id: number; x: number; y: number; text: string }[] = [];
     const taken: { sx: number; sy: number }[] = [];
+    /* City labels belong to another layer with its own declutter, so a محله could land on
+       top of «اهواز». City anchors are collected here and hood names keep clear of them. */
+    const cityAnchors: { sx: number; sy: number }[] = [];
+    for (const st of settlements) {
+      /* only places big enough to carry a label at this zoom are worth avoiding */
+      if (st.kind !== "city" && (st.pop ?? 0) < 20000) continue;
+      const [cx2, cy2] = scene.proj(st.lat, st.lon);
+      cityAnchors.push({ sx: cx2 * view.k + view.tx, sy: cy2 * view.k + view.ty });
+    }
     /* Greedy screen-space declutter, same idea as the markers: a name is drawn only if no
        accepted name sits within ~62 px, otherwise the city core turns into a word cloud.
        Nearer-to-city-centre names win, so a neighbourhood keeps its label over a hamlet. */
@@ -1598,7 +1618,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
       const sx = x * view.k + view.tx;
       const sy = y * view.k + view.ty;
       if (sx < box.x0 - 60 || sx > box.x1 + 60 || sy < box.y0 - 30 || sy > box.y1 + 30) continue;
-      if (taken.some((t) => Math.hypot(t.sx - sx, t.sy - sy) < 26)) continue;
+      const gap = view.k < 14 ? 36 : 26;      // crowded at city scale, roomier close in
+      if (taken.some((t) => Math.hypot(t.sx - sx, t.sy - sy) < gap)) continue;
+      if (cityAnchors.some((c) => Math.hypot(c.sx - sx, c.sy - sy) < 46)) continue;
       taken.push({ sx, sy });
       out.push({
         id: n.osmId,
@@ -1618,11 +1640,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               x={n.x}
               y={n.y - 3 / view.k}
               textAnchor="middle"
-              fontSize={7.4 / view.k}
+              fontSize={fs(7.4)}
               fill={checkedSet.has(`hood:${n.id}`) ? "#15803d" : "#5b21b6"}
               paintOrder="stroke"
               stroke="#ffffff"
-              strokeWidth={2 / view.k}
+              strokeWidth={(2 * unitsPerPx) / view.k}
               pointerEvents="none"
             >
               {n.text}
@@ -1631,7 +1653,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         ))}
       </g>
     );
-  }, [layers.hoods, data.neighbourhoods, scene, view.k, view.tx, view.ty, checkedSet]);
+  }, [layers.hoods, data.neighbourhoods, scene, view.k, view.tx, view.ty, checkedSet, unitsPerPx, settlements]);
 
   const measureLayer = useMemo(() => {
     if (!layers.measures || !data.measurements.length) return null;
@@ -1646,10 +1668,10 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           return (
             <g key={m.id} data-measure={m.id}>
               <path d={d} fill="#f59e0b" fillOpacity={0.12} stroke="#b45309"
-                    strokeWidth={2 / view.k} strokeDasharray={`${2 / view.k} ${5 / view.k}`} />
-              <text x={cx} y={cy} textAnchor="middle" fontSize={9 / view.k} fontWeight={700}
+                    strokeWidth={(2 * unitsPerPx) / view.k} strokeDasharray={`${2 / view.k} ${5 / view.k}`} />
+              <text x={cx} y={cy} textAnchor="middle" fontSize={fs(9)} fontWeight={700}
                     fill="#92400e" paintOrder="stroke" stroke="#ffffff"
-                    strokeWidth={2.4 / view.k} pointerEvents="none">
+                    strokeWidth={(2.4 * unitsPerPx) / view.k} pointerEvents="none">
                 {`${m.name} · ${m.areaKm2.toFixed(2)} کم²`}
               </text>
             </g>
@@ -1657,7 +1679,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         })}
       </g>
     );
-  }, [layers.measures, data.measurements, scene, view.k]);
+  }, [layers.measures, data.measurements, scene, view.k, unitsPerPx]);
 
   const prospectLayer = useMemo(() => {
     if (!layers.prospects || !data.prospects.length) return null;
@@ -1679,9 +1701,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <path d={`M${x} ${y - r * 2.6} L${x + r * 2.2} ${y - r * 2.0} L${x} ${y - r * 1.4} Z`}
                     fill={tone(p.status)} stroke="#334155" strokeWidth={1 / view.k} />
               <circle cx={x} cy={y} r={1.6 / view.k} fill="#334155" />
-              <text x={x} y={y - r * 3.2} textAnchor="middle" fontSize={7.5 / view.k}
+              <text x={x} y={y - r * 3.2} textAnchor="middle" fontSize={fs(7.5)}
                     fontWeight={700} fill="#0f172a" paintOrder="stroke" stroke="#ffffff"
-                    strokeWidth={2 / view.k} pointerEvents="none">
+                    strokeWidth={(2 * unitsPerPx) / view.k} pointerEvents="none">
                 {p.priority}
               </text>
             </g>
@@ -1689,7 +1711,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         })}
       </g>
     );
-  }, [layers.prospects, data.prospects, scene, view.k]);
+  }, [layers.prospects, data.prospects, scene, view.k, unitsPerPx]);
 
   const siteLayer = useMemo(() => {
     if (onlyUnnamed) return null;
@@ -1719,7 +1741,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               {/* a 5.4 px badge is not a click target: an invisible disc makes it one */}
               <circle cx={x} cy={y} r={11 / view.k} fill="transparent" />
               {on ? (
-                <circle cx={x} cy={y} r={12 / view.k} fill="none" stroke={fill} strokeWidth={2 / view.k} />
+                <circle cx={x} cy={y} r={12 / view.k} fill="none" stroke={fill} strokeWidth={(2 * unitsPerPx) / view.k} />
               ) : null}
               <circle cx={x} cy={y} r={9 / view.k} fill={fill} opacity={0.22} />
               <circle cx={x} cy={y} r={5.4 / view.k} fill={fill} stroke="#fff" strokeWidth={1.4 / view.k} />
@@ -1727,7 +1749,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 x={x}
                 y={y + 1.9 / view.k}
                 textAnchor="middle"
-                fontSize={6.4 / view.k}
+                fontSize={fs(6.4)}
                 fontWeight={700}
                 fill="#fff"
                 paintOrder="stroke"
@@ -1741,7 +1763,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         })}
       </g>
     );
-  }, [layers.sites, data.sites, scene, view.k, onlyUnnamed, selSite]);
+  }, [layers.sites, data.sites, scene, view.k, onlyUnnamed, selSite, unitsPerPx]);
 
   const connectorPts = useMemo(() => {
     if (!connectors?.length) return null;
@@ -2953,7 +2975,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                       x={cx}
                       y={cy - r - 6 / view.k}
                       textAnchor="middle"
-                      fontSize={11 / view.k}
+                      fontSize={fs(11)}
                       fontWeight={600}
                       fill="#0f766e"
                       paintOrder="stroke"
@@ -2987,7 +3009,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                         ? `M${drawPts.map(([la, lo]) => scene.proj(la, lo).join(" ")).join(" L")}`
                         : ""
                     }
-                    fill="none" stroke="#0284c7" strokeWidth={2 / view.k}
+                    fill="none" stroke="#0284c7" strokeWidth={(2 * unitsPerPx) / view.k}
                     strokeDasharray={`${5 / view.k} ${4 / view.k}`}
                   />
                   {drawPts.map(([la, lo], i) => {
