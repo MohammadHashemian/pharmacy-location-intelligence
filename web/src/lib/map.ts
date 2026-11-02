@@ -111,6 +111,8 @@ export type MapPharmacy = {
   source: string;
   name: string;
   nameEn: string | null;
+  /** OSM nodes tagged `amenity=pharmacy` with no name: probably real, certainly unverified. */
+  unnamed?: boolean;
   lat: number;
   lon: number;
   /** Distance to the nearest administrative settlement, km. */
@@ -477,7 +479,8 @@ export function loadMapData(): MapData {
   `).map((p) => ({
     id: `${p.osm_type}/${p.osm_id}`,
     source: p.source ?? p.osm_type,
-    name: p.name ?? "داروخانه (بینام)",
+    name: p.name ?? "داروخانه بدون نام",
+    unnamed: !p.name,
     nameEn: p.name_en,
     lat: Math.round(p.lat * 1e4) / 1e4,
     lon: Math.round(p.lon * 1e4) / 1e4,

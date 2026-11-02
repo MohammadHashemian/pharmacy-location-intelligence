@@ -371,6 +371,27 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Unnamed pharmacies: kept, marked, and reviewable
+
+Twelve OSM nodes carry `amenity=pharmacy` and no name. Dropping them would quietly
+under-count supply in the towns they sit in; treating them like verified pins would let an
+unchecked guess drive the ranking. They stay, labelled «داروخانه بدون نام», and are marked
+so nobody mistakes them for confirmed:
+
+| | |
+|---|---|
+| on the map | amber diamond, dashed rim, «؟» glyph above 10× |
+| chip | «۱۲ بدون نام» — toggling it enters review mode |
+| review mode | only those 12 pins, density wash off, settlement dots off, no merging; view frames them all |
+| review list | 12 rows with settlement + distance; click flies to that pin at 16× |
+| panel | warning banner: comes from OSM, nobody named it, check the satellite view |
+
+Measured: default view 434 markers of which 12 dashed; review mode 12 markers, 0 medical
+pins, 0 settlement dots, 0 density cells; clicking a row centres its pin.
+
+They are deliberately **not** editable — an OSM row is rewritten by the next import. If one
+is confirmed on the ground, add it through «افزودن داروخانه» with its real name.
+
 ### Hand-added places of any kind (`manual_place`)
 
 A pin a person adds is not always a pharmacy: it can be a درمانگاه, a مطب, a dentist, a

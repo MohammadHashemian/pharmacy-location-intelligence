@@ -692,6 +692,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const [addMode, setAddMode] = useState(false);
   const [addPin, setAddPin] = useState<{ lat: number; lon: number } | null>(null);
   const [addKind, setAddKind] = useState<string>("pharmacy");
+  /** Show only the pharmacies nobody named — the ones that still need a human look. */
+  const [onlyUnnamed, setOnlyUnnamed] = useState(false);
+  const unnamedCount = data.pharmacies.filter((p) => p.unnamed).length;
   const [addName, setAddName] = useState("");
   const [addAddr, setAddAddr] = useState("");
   const [addPhone, setAddPhone] = useState("");
@@ -1129,6 +1132,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     commit(k, W / 2 - (W / 2 - v.tx) * (k / v.k), H / 2 - (H / 2 - v.ty) * (k / v.k));
   };
 
+  /** Frame a bare coordinate — used by the unnamed-pharmacy review list. */
+  const flyLatLon = (lat: number, lon: number, k = 15) => {
+    const [x, y] = scene.proj(lat, lon);
+    commit(k, W / 2 - x * k, H / 2 - y * k);
+  };
+
   const flyTo = (s: MapSettlement, k = 6) => {
     const [x, y] = scene.proj(s.lat, s.lon);
     commit(k, W / 2 - x * k, H / 2 - y * k);
@@ -1183,20 +1192,22 @@ export function KhuzestanMap({ data }: { data: MapData }) {
        7 px lattice, and a merged marker carries «+n», so 105 diamonds in a district
        stay countable instead of stacking. */
     if (!layers.osm) return null;
-    const px = pharmRadiusPx(view.k);
+    const px = Math.max(pharmRadiusPx(view.k), onlyUnnamed ? 8 : 0);
     const r = px / view.k;
     /* Greedy screen-space declutter: a marker is drawn only if no accepted marker
        is within one marker-width of it, otherwise it is folded into that marker's
        «+n». A lattice alone still let diagonal neighbours overlap. */
     /* Merging is for the province and city views; at district zoom every shop must be
        its own pin, otherwise a street of four pharmacies shows as «+3». */
-    const declutter = view.k < 13;
+    /* review mode never merges: the point is to see each unnamed pin separately */
+    const declutter = view.k < 13 && !onlyUnnamed;
     const gapPx = declutter ? px * 1.9 : 1;
     const gap = declutter ? gapPx / view.k : 0;
     const buckets = new Map<string, { x: number; y: number; n: number; i: number }>();
     const grid = new Map<string, { x: number; y: number; n: number; i: number }[]>();
     const gkey = (x: number, y: number) => `${Math.floor(x * view.k / gapPx)}:${Math.floor(y * view.k / gapPx)}`;
     for (const p of scene.pharm) {
+      if (onlyUnnamed && !data.pharmacies[p.i]?.unnamed) continue;
       if (!declutter) {
         buckets.set(`${p.i}`, { x: p.x, y: p.y, n: 1, i: p.i });
         continue;
@@ -1233,14 +1244,34 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             data-lon={data.pharmacies[b.i]?.lon}
             data-merged={b.n}
           >
+            {/* An OSM pharmacy with no name is probably real — somebody mapped the shop
+                but not its sign. Kept on the map so the count stays honest, drawn hollow
+                and dashed so it is never mistaken for a verified point. */}
             <path
               d={`M${b.x} ${b.y - r} L${b.x + r} ${b.y} L${b.x} ${b.y + r} L${b.x - r} ${b.y}Z`}
-              fill={COLORS.pharmacy}
-              fillOpacity={0.98}
+              /* hollow white on a pale basemap is invisible — the unnamed pin is a pale
+                 amber fill with a heavier dashed rim, unmistakably «not verified» next to
+                 a solid orange diamond */
+              fill={data.pharmacies[b.i]?.unnamed ? "#fbbf24" : COLORS.pharmacy}
+              fillOpacity={data.pharmacies[b.i]?.unnamed ? 0.9 : 0.98}
               stroke="#7c2d12"
-              strokeWidth={1.3}
+              strokeWidth={data.pharmacies[b.i]?.unnamed ? 1.9 : 1.3}
+              strokeDasharray={data.pharmacies[b.i]?.unnamed ? `${2.2 / view.k} ${1.6 / view.k}` : undefined}
               vectorEffect="non-scaling-stroke"
             />
+            {data.pharmacies[b.i]?.unnamed && view.k >= 10 ? (
+              <text
+                x={b.x}
+                y={b.y + r * 0.55}
+                fontSize={7 / view.k}
+                fontWeight={700}
+                textAnchor="middle"
+                fill="#7c2d12"
+                pointerEvents="none"
+              >
+                ؟
+              </text>
+            ) : null}
             {b.n >= 3 && view.k >= 5 ? (
               <text
                 x={b.x + r * 1.1}
@@ -1260,11 +1291,14 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         ))}
       </g>
     );
-  }, [scene, layers.osm, view.k]);
+  }, [scene, layers.osm, view.k, onlyUnnamed, data.pharmacies]);
 
   /* Demand side: clinics, doctors, dentists, hospitals, labs. Violet so it never
      reads as a pharmacy, and a plus sign for the ones that write prescriptions. */
   const medicalLayer = useMemo(() => {
+    /* filtering to the unnamed pharmacies is a review mode: leave only them and the
+       streets, otherwise twelve hollow diamonds hide among 865 medical pins */
+    if (onlyUnnamed) return null;
     if (!layers.med || view.k < 1.6) return null;
     const px = medRadiusPx(view.k);
     const r = px / view.k;
@@ -1307,13 +1341,14 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         })}
       </g>
     );
-  }, [data.medical, layers.med, scene.med, view.k]);
+  }, [data.medical, layers.med, scene.med, view.k, onlyUnnamed]);
 
   /* Urban streets, projected once and grouped by class. Only the city the view
      is centred on is loaded, and only above ~5x. */
   /* Ranked places to open a pharmacy. Drawn as numbered badges because the order is
      the point: a star without a rank says nothing. */
   const siteLayer = useMemo(() => {
+    if (onlyUnnamed) return null;
     if (!layers.sites || !data.sites.length) return null;
     return (
       <g pointerEvents="none">
@@ -1343,7 +1378,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         })}
       </g>
     );
-  }, [layers.sites, data.sites, scene, view.k]);
+  }, [layers.sites, data.sites, scene, view.k, onlyUnnamed]);
 
   const connectorPts = useMemo(() => {
     if (!connectors?.length) return null;
@@ -2072,6 +2107,62 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             </span>
           </div>
           <div className="flex w-full flex-wrap items-center gap-1.5">
+            {unnamedCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !onlyUnnamed;
+                  setOnlyUnnamed(next);
+                  /* twelve pins scattered across the province are invisible at street zoom:
+                     entering review mode frames all of them, otherwise the toggle looks
+                     like it did nothing. */
+                  if (!next) return;
+                  const pts = data.pharmacies.filter((p) => p.unnamed);
+                  if (!pts.length) return;
+                  const lat = pts.reduce((a, p) => a + p.lat, 0) / pts.length;
+                  const lon = pts.reduce((a, p) => a + p.lon, 0) / pts.length;
+                  const spanLat = Math.max(0.04, 2 * Math.max(...pts.map((p) => Math.abs(p.lat - lat))));
+                  const spanLon = Math.max(0.04, 2 * Math.max(...pts.map((p) => Math.abs(p.lon - lon))));
+                  const [x, y] = scene.proj(lat, lon);
+                  const k = Math.max(
+                    2,
+                    Math.min(MAX_ZOOM, 0.82 * Math.min(H / (spanLat * 194), W / (spanLon * 194))),
+                  );
+                  commit(k, W / 2 - x * k, H / 2 - y * k);
+                }}
+                title="داروخانه‌هایی که در OSM نام ندارند — احتمالاً واقعی‌اند ولی کسی نامشان را ثبت نکرده"
+                className={`rounded-lg border px-2 py-1 text-[10.5px] font-medium transition ${
+                  onlyUnnamed
+                    ? "border-warn bg-warn-soft text-warn"
+                    : "border-line-strong bg-surface text-muted hover:text-ink"
+                }`}
+              >
+                {group(unnamedCount)} بدون نام{onlyUnnamed ? " · فقط این‌ها" : ""}
+              </button>
+            ) : null}
+            {onlyUnnamed ? (
+              <div className="mt-1.5 w-full rounded-lg border border-warn/40 bg-warn-soft/50 p-1.5">
+                <div className="mb-1 flex items-center justify-between text-[10px] text-warn">
+                  <b>{group(unnamedCount)} داروخانهٔ بی‌نام — برای بررسی</b>
+                  <span className="text-faint">کلیک = نزدیک‌شدن</span>
+                </div>
+                <div className="grid max-h-28 gap-1 overflow-auto sm:grid-cols-2">
+                  {data.pharmacies
+                    .filter((p) => p.unnamed)
+                    .map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => flyLatLon(p.lat, p.lon, 16)}
+                        className="flex items-center justify-between gap-1 rounded border border-line-strong bg-surface px-1.5 py-0.5 text-[10px] text-ink hover:border-warn"
+                      >
+                        <span className="truncate">{p.settlement ?? "بدون آبادی"}</span>
+                        <span className="tnum shrink-0 text-faint">{p.km.toFixed(1)} کم</span>
+                      </button>
+                    ))}
+                </div>
+              </div>
+            ) : null}
             {/* one segmented control instead of two loose mode buttons */}
             <div className="flex overflow-hidden rounded-lg border border-line-strong">
               {(
@@ -2315,7 +2406,12 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <g data-layer="connectors">{connectorLayer}</g>
               {layers.density && view.k < 1.2 ? cellLayer : null}
               {layers.density && fineCells ? (
-                <g data-layer="density" shapeRendering="crispEdges" clipPath="url(#provClip)" opacity={0.92}>
+                <g
+                  data-layer="density"
+                  shapeRendering="crispEdges"
+                  clipPath="url(#provClip)"
+                  opacity={onlyUnnamed ? 0 : 0.92}
+                >
                   {fineCells.cells.map((c, i) => (
                     <rect
                       key={i}
@@ -2399,7 +2495,8 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
               <g data-layer="streets">{streetLayer}</g>
               <g data-layer="network">{layers.network ? edgeLayer : null}</g>
-              <g data-layer="settlements">{dotLayer}</g>
+              {/* 3,677 settlement dots hide twelve pins: reviewing them is a different map */}
+              <g data-layer="settlements">{onlyUnnamed ? null : dotLayer}</g>
               <g data-layer="medical">{medicalLayer}</g>
               <g data-layer="pharmacy">{pharmacyLayer}</g>
               <g data-layer="sites">{siteLayer}</g>

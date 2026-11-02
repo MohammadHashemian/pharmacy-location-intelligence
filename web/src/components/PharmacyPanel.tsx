@@ -175,6 +175,14 @@ export function PlacePanel({
         </div>
       </div>
 
+      {pharm?.unnamed ? (
+        <div className="mb-2 rounded-lg border border-warn/40 bg-warn-soft px-2 py-1.5 text-[10.5px] leading-4 text-warn">
+          <b>بدون نام.</b> این نقطه از OSM آمده و کسی نامش را ثبت نکرده — احتمالاً داروخانهٔ
+          واقعی است. روی تصویر ماهواره‌ای بررسی کنید؛ اگر تأیید شد، با «افزودن داروخانه» نامش را
+          ثبت کنید و این نقطهٔ بی‌نام را نادیده بگیرید.
+        </div>
+      ) : null}
+
       {manualId && editing ? (
         <div className="mb-2 rounded-lg border border-line bg-surface-2 p-2">
           <label className="mb-1.5 block">
