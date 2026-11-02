@@ -2753,7 +2753,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             const site = data.sites.find((x) => x.rank === selSite);
             if (!site) return null;
             return (
-              <div className="absolute bottom-2 right-2 z-30 w-[290px] max-w-[88vw] rounded-xl border border-[#16a34a]/40 bg-surface p-2.5 text-[11px] shadow-xl">
+              <div className="absolute bottom-2 right-2 z-30 max-h-[76vh] w-[290px] max-w-[88vw] overflow-auto rounded-xl border border-[#16a34a]/40 bg-surface p-2.5 text-[11px] shadow-xl">
                 <div className="flex items-start justify-between gap-2">
                   <b className="text-[12px] text-ink">
                     پیشنهاد #{site.rank} · {site.settlement ?? "—"}
@@ -2777,7 +2777,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                   {site.scoreHigh > site.scoreLow + 0.005 ? (
                     <span className="tnum text-faint" title="بازه: یک رقیب تازه باز شود و جمعیت ۲۰٪ خطا داشته باشد">
                       {" "}
-                      ({site.scoreLow.toFixed(2)}–{site.scoreHigh.toFixed(2)})
+                      <bdi dir="ltr">
+                        ({site.scoreLow.toFixed(2)}–{site.scoreHigh.toFixed(2)})
+                      </bdi>
                     </span>
                   ) : null}
                 </div>

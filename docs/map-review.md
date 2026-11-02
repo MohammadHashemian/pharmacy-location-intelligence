@@ -97,3 +97,21 @@ Items 1 and 2, in one small PR: clickable badges with the reason sentence and a
 source-tagged supply figure. That converts 111 anonymous dots into inspectable
 recommendations using data already on the page — the cheapest possible improvement to the
 question «should I open a pharmacy here?».
+
+
+---
+
+## What shipped (P0 + P1)
+
+| item | what a user can now do | test |
+|---|---|---|
+| P0.1 | click any numbered badge → popup with score, **the stored reason sentence**, the four components, and the pharmacies you would compete with | `tools/test_site_panel.py` |
+| P0.2 | see where each count came from: «فید» (FDA) or «نقشه» (mapped/hand-added), population year and source | `tools/test_labels_and_sources.py` |
+| P0.3 | two lists named by their unit — «کمبود داروخانه» (per settlement) vs «پیشنهاد در سطح بلوک جمعیتی» (0–1 score) | `tools/test_labels_and_sources.py` |
+| P1.4 | shortlist 2–5 candidates and compare them side by side; the numbers are a snapshot, dated | `tools/test_shortlist.py` |
+| P1.5 | the URL carries mode, radius, target and the open candidate — a decision can be sent to a partner | `tools/test_url_state.py` |
+| P1.6 | every score shows its span «0.52 (0.32–0.63)»: one competitor opens, population off by a fifth | `tools/test_score_range.py` |
+| — | the whole journey in one run: badge → reason → shortlist → compare → share → reopen | `tools/test_decision_flow.py` |
+
+Still open, deliberately: P2 (walk isochrone instead of a 3 km circle, anchor quality, competitor
+quality, canvas rendering at province zoom) and P3 (state the model's blind spots in the UI).
