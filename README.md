@@ -371,6 +371,28 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Satellite tiles are local (`/api/tile/[z]/[x]/[y]` + `etl/prefetch_sat.py`)
+
+The imagery used to be fetched straight from ArcGIS by the browser, so every pan and every
+reload paid a round trip to the internet. It now goes through our own route, which stores the
+tile on disk the first time and serves it from there forever:
+
+```
+web/src/app/api/tile/[z]/[x]/[y]/route.ts   →  data/tiles/sat/<z>/<x>/<y>.jpg
+etl/prefetch_sat.py --zooms 8-13            →  warm the province before you look
+```
+
+Measured: `x-tile-cache: miss-stored` on first view, `disk` afterwards, and **0 requests to
+`server.arcgisonline.com` from the browser**. The route refuses to cache a placeholder
+(z19 over خوزستان answers 200 with a ~2 KB stub), so a blank tile cannot freeze onto the map.
+
+Prefetched province, z8–13: **2,355 tiles / 38 MB (z8–12), z13 in progress** — the store is
+gitignored because it is derivable, and it lives outside `web/public` because files written
+under public are copied at build time and would 404 in production.
+
+Deep zoom past z13 caches itself the first time you look; a whole-province z14 would be
+~570 MB, which is not a download anyone asked for.
+
 ### The LLM audit: what the rules were confidently wrong about
 
 The rules are the first pass, not the last word. `python etl/classify_with_llm.py --run --audit`

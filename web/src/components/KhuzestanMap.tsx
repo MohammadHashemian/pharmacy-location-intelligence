@@ -1752,7 +1752,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         const [bx, by] = scene.proj(latOf(ty + 1), lonOf(tx + 1));
         out.push({
           key: `${z}/${ty}/${wrap}`,
-          href: `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${ty}/${wrap}`,
+          /* Through our own route, which stores the tile on first fetch: the
+             provider is touched once per tile, never again per view. */
+          href: `/api/tile/${z}/${wrap}/${ty}`,
           x: ax,
           y: ay,
           w: bx - ax,

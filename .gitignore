@@ -38,3 +38,6 @@ tools/7z/
 # generated admin-layer exports (regenerate with etl/report_admin.py)
 reports/admin_khuzestan.csv
 reports/admin_khuzestan.xlsx
+
+# satellite tile store: derivable, ~100 MB per province — rebuild with etl/prefetch_sat.py
+data/tiles/sat/
