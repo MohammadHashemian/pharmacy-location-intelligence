@@ -371,6 +371,26 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Why a town showed no streets (three different answers)
+
+«ملاثانی has streets, the district next to it has none» — measured, and it was three
+separate things:
+
+1. **One street file at a time.** The loader fetched the file nearest the *view centre*
+   only, so every neighbour within the same screen rendered as bare imagery. It now takes
+   every city whose disc intersects the viewport (max 6, cached), merged into one layer:
+   ملاثانی at 13× went **540 → 2,366** polylines, a between-towns view **25,382**, south
+   اهواز **30,240**.
+2. **Contrast, not data.** ملاثانی's file really holds **175 of its 270 ways within 1 km**
+   of the centre, but they were drawn 1 px in `#8a9bad` with a white casing — invisible over
+   imagery and under the density wash. Over satellite the body is now `#f8fafc` on a dark
+   casing, 0.6 px wider, and the density opacity steps back to 0.45 above 6×.
+3. **A real data gap, and the big one:** **52,773 of OSM's 104,986 residential ways (50 %)**
+   lie outside every city disc and are in no file at all — village lanes and town outskirts.
+   The connector layer covers tertiary/unclassified only, so those lanes exist in OSM, cost
+   us nothing to fetch, and are simply not shipped. Building them is the next real gain
+   (~8-10 MB, or one file per county loaded on demand).
+
 ### Deep zoom on satellite imagery (`tools/test_satellite_zoom.py`)
 
 `MAX_ZOOM` was 40, which put the map at ~12 m/px — Esri zoom 14, «an aerial photo», not «I

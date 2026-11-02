@@ -567,44 +567,52 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         streetIndex.current = Array.isArray(idx) ? idx : [];
       }
       const idx = streetIndex.current ?? [];
+      /* Every city whose disc intersects what the screen shows — not just the one
+         under the centre. A town's neighbour 3 km away used to render as bare
+         imagery because its file was never asked for: «ملاثانی has streets,
+         کریشان جدید next to it has none». */
       const cx0 = -settled.tx / settled.k;
       const cy0 = -settled.ty / settled.k;
-      const [vLat, vLon] = scene.inv(cx0 + W / 2 / settled.k, cy0 + H / 2 / settled.k);
-      let best: (typeof idx)[number] | null = null;
-      let bestD = Infinity;
-      for (const c of idx) {
-        const d = Math.hypot((c.lat - vLat) * 111, (c.lon - vLon) * 95);
-        if (d < bestD) {
-          bestD = d;
-          best = c;
+      const [latA, lonA] = scene.inv(cx0, cy0);
+      const [latB, lonB] = scene.inv(cx0 + W / settled.k, cy0 + H / settled.k);
+      const latMid = (latA + latB) / 2;
+      const lonMid = (lonA + lonB) / 2;
+      const halfKm = Math.max(
+        Math.abs(latB - latA) * 55.5,          // half height, km
+        Math.abs(lonB - lonA) * 47.5,          // half width, km
+      );
+      const wanted = idx
+        .map((c) => ({ c, d: Math.hypot((c.lat - latMid) * 111, (c.lon - lonMid) * 95) }))
+        .filter((x) => x.d <= x.c.r_km + halfKm * 1.2)
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 6)
+        .map((x) => x.c);
+      if (!wanted.length) return;             // nothing in view: keep what is drawn
+
+      const parts: { c: string; p: [number, number][] }[] = [];
+      const cities: string[] = [];
+      for (const city of wanted) {
+        cities.push(city.city);
+        const cached = streetCache.current.get(city.slug);
+        if (cached) {
+          parts.push(...cached);
+          continue;
         }
+        const fc = await fetch(`/geo/streets_${city.slug}.json`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+        const feats = (fc?.features ?? [])
+          .map((f: { properties?: { c?: string }; geometry?: { coordinates?: [number, number][] } }) => ({
+            c: f.properties?.c ?? "residential",
+            p: (f.geometry?.coordinates ?? []).map(([lon, lat]) => [lat, lon] as [number, number]),
+          }))
+          .filter((f: { p: [number, number][] }) => f.p.length >= 2);
+        streetCache.current.set(city.slug, feats);
+        parts.push(...feats);
       }
-      if (!best || bestD > best.r_km * 1.5) {
-        /* Out of every city's disc: keep what is already drawn rather than blanking
-           it, because those streets are still under the cursor and a flash of empty
-           imagery reads as a bug. */
-        return;
-      }
-      if (streetCache.current.has(best.slug)) {
-        if (alive) {
-          setStreetLines(streetCache.current.get(best.slug) ?? []);
-          setStreetCity(best.city);
-        }
-        return;
-      }
-      const fc = await fetch(`/geo/streets_${best.slug}.json`)
-        .then((r) => (r.ok ? r.json() : null))
-        .catch(() => null);
-      const feats = (fc?.features ?? [])
-        .map((f: { properties?: { c?: string }; geometry?: { coordinates?: [number, number][] } }) => ({
-          c: f.properties?.c ?? "residential",
-          p: (f.geometry?.coordinates ?? []).map(([lon, lat]) => [lat, lon] as [number, number]),
-        }))
-        .filter((f: { p: [number, number][] }) => f.p.length >= 2);
-      streetCache.current.set(best.slug, feats);
       if (alive) {
-        setStreetLines(feats);
-        setStreetCity(best.city);
+        setStreetLines(parts);
+        setStreetCity(cities.join(" · "));
       }
     })();
     return () => {
@@ -1341,8 +1349,8 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             key={`c-${cls}`}
             d={ds.join(" ")}
             fill="none"
-            stroke="#ffffff"
-            strokeOpacity={0.9}
+            stroke={layers.sat ? "#0b1220" : "#ffffff"}
+            strokeOpacity={layers.sat ? 0.55 : 0.9}
             strokeWidth={((width[cls] ?? 0.8) + 1.6) / view.k}
             strokeLinecap="round"
           />
@@ -1352,15 +1360,18 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             key={cls}
             d={ds.join(" ")}
             fill="none"
-            stroke="#8a9bad"
+            /* On imagery a grey line on grey rooftops is invisible — the town core
+               read as «no streets», which is what was reported. Light body with a
+               dark casing is the standard pairing over photography. */
+            stroke={layers.sat ? "#f8fafc" : "#8a9bad"}
             strokeOpacity={0.95}
-            strokeWidth={(width[cls] ?? 0.8) / view.k}
+            strokeWidth={((width[cls] ?? 0.8) + (layers.sat ? 0.6 : 0)) / view.k}
             strokeLinecap="round"
           />
         ))}
       </g>
     );
-  }, [layers.streets, streetLines, scene, view.k]);
+  }, [layers.streets, streetLines, scene, view.k, layers.sat]);
 
   const edgeLayer = useMemo(
     () => (
@@ -2261,7 +2272,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                           ? 0
                           : ((view.k >= 4.5 ? 0.17 : 0.35) +
                               0.45 * Math.min(1, c.v / fineCells.cap)) *
-                            (layers.sat ? 0.8 : 1) *
+                            (layers.sat ? (view.k >= 6 ? 0.45 : 0.8) : 1) *
                             /* Past 80x a single 500 m cell covers the screen and its
                                wash is a teal filter over the photo: the statistic is
                                meaningless at building scale, so fade it out rather
