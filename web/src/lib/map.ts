@@ -290,6 +290,8 @@ export type MapData = {
   measurements: Measurement[];
   /** Named neighbourhoods (محله) — 312 of them, invisible before this table existed. */
   neighbourhoods: MapNeighbourhood[];
+  /** Places this user has already surveyed: «settlement:<area_id>» / «hood:<osm_id>». */
+  checked: string[];
   user: { id: number; displayName: string; role: string };
   /** [index a, index b] into `settlements`. */
   edges: [number, number][];
@@ -726,6 +728,14 @@ export function loadMapData(): MapData {
     lon: Math.round(r.lon * 1e4) / 1e4,
   }));
 
+  run(`CREATE TABLE IF NOT EXISTS place_check (
+    user_id INTEGER NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL, note TEXT,
+    checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, kind, ref))`);
+  const checked: string[] = all<{ kind: string; ref: string }>(
+    "SELECT kind, ref FROM place_check WHERE user_id = ?", [user.id],
+  ).map((r) => `${r.kind}:${r.ref}`);
+
   const imp = one<{
     built_at: string;
     reference_name: string;
@@ -821,6 +831,7 @@ export function loadMapData(): MapData {
     surveys,
     measurements,
     neighbourhoods,
+    checked,
     user: { id: user.id, displayName: user.displayName, role: user.role },
     edges,
     cells,

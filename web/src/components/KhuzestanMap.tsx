@@ -792,6 +792,16 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const selectedIdx = selected === null ? undefined : indexOf.get(selected);
   const selectedS = selectedIdx === undefined ? null : settlements[selectedIdx];
   /* which source currently wins the number the analysis uses */
+  const checkedSet = useMemo(() => new Set(data.checked), [data.checked]);
+  const toggleCheck = async (kind: "settlement" | "hood", ref: string | number, on: boolean) => {
+    await fetch("/api/checks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, ref: String(ref), checked: on }),
+    });
+    router.refresh();
+  };
+
   const popWinner = selectedS?.popManual != null
     ? "manual"
     : (selectedS?.popSource ?? "").startsWith("fa.wikipedia")
@@ -1313,19 +1323,37 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           /* Screen-constant symbol: a marker must stay a marker when the map is
              zoomed 20x, otherwise the whole town is one dot. */
           const r = (p.r + (isSel ? 2 : 0)) / view.k;
+          const done = checkedSet.has(`settlement:${s.id}`);
           return (
-            <circle
-              key={s.id}
-              cx={p.x}
-              cy={p.y}
-              r={r}
-              fill={city ? COLORS.city : COLORS.village}
-              fillOpacity={on ? (city ? 0.9 : 0.72) : 0.12}
-              stroke={isSel ? "#0f172a" : s.ph > 0 && layers.pharm ? COLORS.pharmacy : "none"}
-              strokeWidth={isSel ? 1.8 : 1.1}
-              vectorEffect="non-scaling-stroke"
-              strokeOpacity={isSel ? 1 : 0.95}
-            />
+            <g key={s.id} data-settlement={s.id} data-checked={done ? "1" : undefined}>
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={r}
+                fill={city ? COLORS.city : COLORS.village}
+                fillOpacity={on ? (city ? 0.9 : 0.72) : 0.12}
+                stroke={isSel ? "#0f172a" : s.ph > 0 && layers.pharm ? COLORS.pharmacy : "none"}
+                strokeWidth={isSel ? 1.8 : 1.1}
+                vectorEffect="non-scaling-stroke"
+                strokeOpacity={isSel ? 1 : 0.95}
+              />
+              {/* «I have been here»: a small tick beside the dot, not another colour */}
+              {done ? (
+                <text
+                  x={p.x + r * 1.5}
+                  y={p.y - r * 1.2}
+                  fontSize={11 / view.k}
+                  fontWeight={700}
+                  fill="#15803d"
+                  paintOrder="stroke"
+                  stroke="#ffffff"
+                  strokeWidth={2 / view.k}
+                  pointerEvents="none"
+                >
+                  ✓
+                </text>
+              ) : null}
+            </g>
           );
         })}
       </g>
@@ -1462,7 +1490,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         ))}
       </g>
     );
-  }, [scene, layers.osm, view.k, onlyUnnamed, data.pharmacies]);
+  }, [scene, layers.osm, view.k, onlyUnnamed, data.pharmacies, checkedSet]);
 
   /* Demand side: clinics, doctors, dentists, hospitals, labs. Violet so it never
      reads as a pharmacy, and a plus sign for the ones that write prescriptions. */
@@ -1577,7 +1605,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         x,
         y,
         /* the alias is the name people use: show it instead of the OSM label, not beside it */
-        text: n.alias ?? n.name.split(" - ")[0],
+        text: `${checkedSet.has(`hood:${n.osmId}`) ? "✓ " : ""}${n.alias ?? n.name.split(" - ")[0]}`,
       });
       if (out.length >= 180) break;          // a wall of names is not a map
     }
@@ -1591,7 +1619,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               y={n.y - 3 / view.k}
               textAnchor="middle"
               fontSize={7.4 / view.k}
-              fill="#5b21b6"
+              fill={checkedSet.has(`hood:${n.id}`) ? "#15803d" : "#5b21b6"}
               paintOrder="stroke"
               stroke="#ffffff"
               strokeWidth={2 / view.k}
@@ -1603,7 +1631,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         ))}
       </g>
     );
-  }, [layers.hoods, data.neighbourhoods, scene, view.k, view.tx, view.ty]);
+  }, [layers.hoods, data.neighbourhoods, scene, view.k, view.tx, view.ty, checkedSet]);
 
   const measureLayer = useMemo(() => {
     if (!layers.measures || !data.measurements.length) return null;
@@ -2450,6 +2478,14 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             >
               {group(data.neighbourhoods.length)} محله
             </span>
+            {data.checked.length ? (
+              <span
+                className="whitespace-nowrap rounded-md border border-good/40 bg-good-soft px-1.5 py-0.5 text-[10.5px] font-medium text-good"
+                title="مکان‌هایی که این کاربر بررسی کرده — در پایگاه داده ذخیره شده‌اند"
+              >
+                ✓ {group(data.checked.length)} بررسی‌شده
+              </span>
+            ) : null}
             <span className="flex-1" />
             {/* six checkboxes used to eat three wrapped rows; they live in one
                 popover now, and the toolbar stays a single line */}
@@ -4030,6 +4066,21 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 {KIND_FA[selectedS.kind]}
               </span>
             </div>
+            <button
+              type="button"
+              onClick={() => toggleCheck("settlement", selectedS.id, !checkedSet.has(`settlement:${selectedS.id}`))}
+              className={`mt-1.5 w-full rounded-lg border px-2 py-1 text-[10.5px] font-medium ${
+                checkedSet.has(`settlement:${selectedS.id}`)
+                  ? "border-good/50 bg-good-soft text-good"
+                  : "border-line-strong bg-surface text-muted hover:border-good hover:text-good"
+              }`}
+              title="این مکان را بررسی کرده‌اید — برای این کاربر ذخیره می‌شود و پس از رفرش می‌ماند"
+            >
+              {checkedSet.has(`settlement:${selectedS.id}`)
+                ? "✓ بررسی‌شده — برداشتن علامت"
+                : "علامت‌گذاری به‌عنوان بررسی‌شده"}
+            </button>
+
             <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
               {[
                 ["جمعیت", fmtPop(selectedS.pop)],

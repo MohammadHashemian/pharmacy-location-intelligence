@@ -371,6 +371,28 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### «بررسی شد» is a row in the database, per user (`/api/checks`)
+
+Two different things were being conflated, so both are now explicit:
+
+| what you mark | table | shape |
+|---|---|---|
+| an area you walked (drawn polygon) | `survey_area` | polygon + km² |
+| **a place you have already checked** | **`place_check`** | `(user_id, kind, ref)` |
+| a place you plan to visit | `prospect` | point + status |
+
+`place_check` takes `kind = settlement | hood` and the id — a tick on a village or a
+neighbourhood, not a shape. It is scoped by `user_id` like everything else, so it survives a
+refresh, a restart, and will belong to the right account when authentication lands.
+
+On screen: a green ✓ beside the settlement dot, `✓ کوت نواصر` in the neighbourhood label, a
+`✓ N بررسیشده` chip in the header, and a toggle button in the settlement card
+(«علامتگذاری بهعنوان بررسیشده» ⇄ «بررسیشده — برداشتن علامت»).
+
+`tools/test_checks.py`: the toggle writes a row with the user id, the tick survives a full
+reload, a neighbourhood marked through the API shows its ✓, a second user's marks are
+invisible, unticking deletes the row.
+
 ### The watch list has no cap (`/api/prospects`)
 
 Reported as «I can only add 3 places». There was never a row limit — **priority was clamped
