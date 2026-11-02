@@ -154,7 +154,12 @@ def ask(key: str, model: str, items: list[dict], timeout: int = 120) -> str:
 
 
 def apply_rows(c: sqlite3.Connection, model: str) -> tuple[int, int, int]:
-    """Move/delete what the model was sure about. Nothing else is touched."""
+    """Move/delete what the model was sure about. Nothing else is touched.
+
+    Counters are what the database actually changed — `cursor.rowcount`, not how many
+    verdicts were considered. The first version reported «756 re-kinded» on every run
+    because it incremented once per matching verdict, which made a no-op run look busy.
+    """
     moved = fixed = dropped = 0
     rows = c.execute("""SELECT src, ref, name, role, confidence FROM poi_classification
                         WHERE model = ? AND confidence >= ?""", (model, FLOOR)).fetchall()
@@ -167,32 +172,32 @@ def apply_rows(c: sqlite3.Connection, model: str) -> tuple[int, int, int]:
                               "FROM map_pharmacy WHERE osm_type || '/' || osm_id = ?",
                               (ref,)).fetchone()
                 if r:
-                    c.execute("""INSERT OR IGNORE INTO map_medical
+                    cur = c.execute("""INSERT OR IGNORE INTO map_medical
                         (kind, name, lat, lon, nearest_area_id, nearest_km, county, address,
                          source, external_id) VALUES (?,?,?,?,?,?,?,?,?,?)""",
                               (role, name, r[0], r[1], r[2], r[3], r[4], r[5], "llm", ref))
-                    moved += 1
-            c.execute("DELETE FROM map_pharmacy WHERE osm_type || '/' || osm_id = ?", (ref,))
-            dropped += 1
+                    moved += max(0, cur.rowcount)
+            cur = c.execute("DELETE FROM map_pharmacy WHERE osm_type || '/' || osm_id = ?", (ref,))
+            dropped += max(0, cur.rowcount)
         else:
             if role in MEDICAL_ROLES:
-                c.execute("UPDATE map_medical SET kind = ? WHERE CAST(id AS TEXT) = ?",
-                          (role, ref))
-                fixed += 1
+                cur = c.execute("UPDATE map_medical SET kind = ? "
+                                "WHERE CAST(id AS TEXT) = ? AND kind <> ?", (role, ref, role))
+                fixed += max(0, cur.rowcount)
             elif role == PHARMACY:
                 r = c.execute("SELECT name, lat, lon, nearest_area_id, nearest_km, county, address "
                               "FROM map_medical WHERE CAST(id AS TEXT) = ?", (ref,)).fetchone()
                 if r:
-                    c.execute("""INSERT OR IGNORE INTO map_pharmacy
+                    cur = c.execute("""INSERT OR IGNORE INTO map_pharmacy
                         (osm_type, osm_id, name, lat, lon, nearest_area_id, nearest_km,
                          county, street, source, external_id)
                         VALUES ('poi', ?, ?, ?, ?, ?, ?, ?, ?, 'llm', ?)""",
                               (ref, r[0], r[1], r[2], r[3], r[4], r[5], r[6], ref))
-                    moved += 1
+                    moved += max(0, cur.rowcount)
                 c.execute("DELETE FROM map_medical WHERE CAST(id AS TEXT) = ?", (ref,))
             elif role == IRRELEVANT:
-                c.execute("DELETE FROM map_medical WHERE CAST(id AS TEXT) = ?", (ref,))
-                dropped += 1
+                cur = c.execute("DELETE FROM map_medical WHERE CAST(id AS TEXT) = ?", (ref,))
+                dropped += max(0, cur.rowcount)
     c.commit()
     return moved, fixed, dropped
 
