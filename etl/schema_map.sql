@@ -179,6 +179,17 @@ GROUP BY l.area_id;
 -- ---------------------------------------------------------------------------
 -- M6. The map's one read path: geography + live counts + computed distances.
 -- ---------------------------------------------------------------------------
+-- Population a person typed in because they know the place. It wins over every imported
+-- source, and the gap table, the density wash and the ranking all read the view, so an edit
+-- lands in the analysis on the next request.
+CREATE TABLE IF NOT EXISTS population_manual (
+  area_id    INTEGER PRIMARY KEY,
+  value      INTEGER NOT NULL,
+  note       TEXT,
+  user_id    INTEGER,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 DROP VIEW IF EXISTS v_map_settlement;
 CREATE VIEW v_map_settlement AS
 SELECT a.area_id,
@@ -187,13 +198,22 @@ SELECT a.area_id,
        a.county,
        a.bakhsh,
        a.dehestan,
-       a.population,
-       a.population_year_sh,
-       a.population_source,
+       COALESCE(pm.value, a.population) AS population,
+       CASE WHEN pm.value IS NOT NULL THEN NULL ELSE a.population_year_sh END AS population_year_sh,
+       CASE WHEN pm.value IS NOT NULL THEN 'manual' ELSE a.population_source END AS population_source,
        a.population_confidence,
        p.lat,
        p.lon,
        p.coord_source,
+       /* every source side by side, and one number that wins */
+       a.population                    AS population_admin,
+       pm.value                        AS population_manual,
+       (SELECT MAX(ap.population) FROM admin_population ap
+         WHERE ap.area_id = a.area_id AND ap.source LIKE 'fa.wikipedia%') AS population_wiki,
+       (SELECT MAX(ap.population) FROM admin_population ap
+         WHERE ap.area_id = a.area_id AND ap.source = 'fda-feed')         AS population_fda,
+       (SELECT MAX(ap.population) FROM admin_population ap
+         WHERE ap.area_id = a.area_id AND ap.source = 'osm-tag')          AS population_osm,
        COALESCE(ph.pharmacy_real, 0)  AS pharmacy_real,
        COALESCE(ph.pharmacy_legal, 0) AS pharmacy_legal,
        COALESCE(ph.pharmacy_real, 0) + COALESCE(ph.pharmacy_legal, 0) AS pharmacy_total,
@@ -210,6 +230,7 @@ SELECT a.area_id,
        p.deg
 FROM v_admin_area_current a
 LEFT JOIN map_point p            ON p.area_id = a.area_id
+LEFT JOIN population_manual pm   ON pm.area_id = a.area_id
 LEFT JOIN v_map_pharmacy ph      ON ph.area_id = a.area_id
 LEFT JOIN v_map_pharmacy_mapped mp ON mp.area_id = a.area_id
 LEFT JOIN v_map_pharmacy_assigned asg ON asg.area_id = a.area_id

@@ -324,6 +324,8 @@ function sourceFa(s: string | null | undefined): string {
       return "فید سازمان غذا و دارو";
     case "osm-tag":
       return "OpenStreetMap";
+    case "manual":
+      return "دستی (خودتان)";
     default:
       return s ?? "—";
   }
@@ -390,6 +392,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     if (Number.isFinite(tt) && tt > 0) setTargetPerPharm(Math.round(tt));
     const sr = Number(q.get("site"));
     if (Number.isInteger(sr) && sr > 0) setSelSite(sr);
+    /* ?settle=<area_id> opens a settlement card — used by links and by the tests */
+    const st = Number(q.get("settle"));
+    if (Number.isInteger(st) && st > 0) setSelected(st);
   }, [data.pharmacies, data.medical]);
   const [selMed, setSelMed] = useState<number | null>(null);
   const [hoverMed, setHoverMed] = useState<{ i: number; x: number; y: number } | null>(null);
@@ -716,6 +721,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const [markNote, setMarkNote] = useState("");
   const [markPriority, setMarkPriority] = useState(2);
   const [markBusy, setMarkBusy] = useState(false);
+  const [popDraft, setPopDraft] = useState("");
+  const [popBusy, setPopBusy] = useState(false);
+  const [popMsg, setPopMsg] = useState<string | null>(null);
   const [drawMode, setDrawMode] = useState(false);
   /** «survey» records ground already walked; «measure» answers «how big is this, and how
    *  many people live here» — the same gesture, a different question. */
@@ -783,6 +791,16 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
   const selectedIdx = selected === null ? undefined : indexOf.get(selected);
   const selectedS = selectedIdx === undefined ? null : settlements[selectedIdx];
+  /* which source currently wins the number the analysis uses */
+  const popWinner = selectedS?.popManual != null
+    ? "manual"
+    : (selectedS?.popSource ?? "").startsWith("fa.wikipedia")
+      ? "wiki"
+      : selectedS?.popSource === "fda-feed"
+        ? "fda"
+        : selectedS?.popSource === "osm-tag"
+          ? "osm"
+          : "admin";
 
   /* ------------------------------------------------------------- filtering */
   const inside = useMemo(() => {
@@ -3986,7 +4004,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
         ) : null}
 
         {selectedS ? (
-          <div className="rounded-2xl border border-brand/25 bg-surface p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
+          /* order-first: you just clicked this settlement, its card belongs at the top of
+             the column instead of six cards down */
+          <div className="order-first rounded-2xl border border-brand/25 bg-surface p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04),0_8px_24px_-12px_rgba(15,23,42,0.12)]">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <div className="text-[15px] font-bold text-ink">{selectedS.name}</div>
@@ -4029,6 +4049,87 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 </div>
               ))}
             </div>
+            {/* every source, side by side: a population number is a claim, not a fact */}
+            <div className="mt-2 rounded-lg bg-surface-2 p-1.5">
+              <div className="mb-1 flex items-center justify-between text-[10px]">
+                <b className="text-ink">جمعیت بر پایهٔ منبع</b>
+                <span className="text-faint">عددی که در محاسبات استفاده می‌شود: {fmtPop(selectedS.pop)}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px]">
+                {(
+                  [
+                    ["admin", "تقسیمات کشوری", selectedS.popAdmin],
+                    ["wiki", "ویکی‌پدیا", selectedS.popWiki],
+                    ["fda", "فید سازمان", selectedS.popFda],
+                    ["osm", "OpenStreetMap", selectedS.popOsm],
+                    ["manual", "دستی", selectedS.popManual],
+                  ] as const
+                ).map(([key, label, value]) => (
+                  <span key={key} className="contents">
+                    <span className={popWinner === key ? "font-bold text-brand-ink" : "text-faint"}>
+                      {label}
+                      {popWinner === key ? " ✓" : ""}
+                    </span>
+                    <span className="tnum text-left text-ink-soft">
+                      {value === null || value === undefined ? "—" : group(value)}
+                    </span>
+                  </span>
+                ))}
+              </div>
+              <div className="mt-1.5 flex items-center gap-1">
+                <input
+                  value={popDraft}
+                  onChange={(e) => setPopDraft(e.target.value.replace(/[^0-9]/g, ""))}
+                  placeholder="جمعیت دقیق را وارد کنید"
+                  dir="ltr"
+                  className="tnum w-full rounded-md border border-line-strong bg-surface px-1.5 py-1 text-left text-[10.5px] text-ink placeholder:text-right placeholder:text-faint"
+                />
+                <button
+                  type="button"
+                  disabled={popBusy || !popDraft || Number(popDraft) <= 0}
+                  onClick={async () => {
+                    setPopBusy(true);
+                    setPopMsg(null);
+                    const r = await fetch("/api/population", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ areaId: selectedS.id, value: Number(popDraft) }),
+                    });
+                    setPopBusy(false);
+                    if (r.ok) {
+                      setPopMsg("ثبت شد — جدول شکاف و رتبه‌بندی به‌روز می‌شوند");
+                      setPopDraft("");
+                      refreshSoon();
+                    } else {
+                      const j = (await r.json().catch(() => ({}))) as { error?: string };
+                      setPopMsg(j.error ?? "ثبت نشد");
+                    }
+                  }}
+                  className="shrink-0 rounded-md border border-brand bg-brand-soft px-1.5 py-1 text-[10px] font-medium text-brand-ink disabled:opacity-40"
+                >
+                  {popBusy ? "…" : "ثبت"}
+                </button>
+                {selectedS.popManual !== null ? (
+                  <button
+                    type="button"
+                    disabled={popBusy}
+                    onClick={async () => {
+                      setPopBusy(true);
+                      await fetch(`/api/population?areaId=${selectedS.id}`, { method: "DELETE" });
+                      setPopBusy(false);
+                      setPopMsg("به مقدار واردشده برگشت");
+                      refreshSoon();
+                    }}
+                    className="shrink-0 rounded-md border border-line-strong px-1.5 py-1 text-[10px] text-danger"
+                    title="حذف مقدار دستی"
+                  >
+                    حذف
+                  </button>
+                ) : null}
+              </div>
+              {popMsg ? <p className="mt-1 text-[9.5px] text-brand-ink">{popMsg}</p> : null}
+            </div>
+
             <div className="mt-2 flex gap-1.5">
               <button
                 type="button"

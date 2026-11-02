@@ -371,6 +371,26 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Population: every source, and a manual override that wins (`/api/population`)
+
+The settlement card lists the four imported sources side by side — تقسیمات کشوری، ویکی‌پدیا،
+فید سازمان، OpenStreetMap — marks the one currently in use, and takes a manual number when
+somebody knows the place better than the feeds.
+
+`v_map_settlement` now resolves `COALESCE(manual, admin)` and exposes `population_admin`,
+`population_wiki`, `population_fda`, `population_osm`, `population_manual`. Because the gap
+table, the density wash, the per-capita ratio and `rank_sites.py` all read that view, a manual
+value lands in the analysis on the next request; the API also re-runs the ranking in the
+background (30 s debounce) so the numbered candidates move.
+
+Sources on file: `fda-feed` 2,898 areas · `fa.wikipedia-*` 3,202 · `osm-tag` 1,980 ·
+`wikidata` 1,461. Where they disagree the card shows the disagreement instead of hiding it —
+«چمران»: three sources say 33,505, OSM says 13,913.
+
+`tools/test_population.py`: card lists the sources, the manual value wins in the view
+(source becomes «manual»), the gap moves by exactly `Δpopulation ÷ target`, a re-rank fires,
+and deleting restores the imported number.
+
 ### Neighbourhoods are a layer now, not an exception list (`etl/import_neighbourhoods.py`)
 
 Reported: «کوت نواصر و کوی هادی در نقشه اسم‌گذاری نشدند». The cause was structural, not two

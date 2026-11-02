@@ -29,6 +29,12 @@ export type MapSettlement = {
   pop: number | null;
   popYear: number | null;
   popSource: string | null;
+  /** Every source side by side, so a number can be argued with instead of trusted. */
+  popAdmin: number | null;
+  popWiki: number | null;
+  popFda: number | null;
+  popOsm: number | null;
+  popManual: number | null;
   lat: number;
   lon: number;
   /** Supply we can actually count: the FDA register, or the pharmacies mapped or added by
@@ -394,6 +400,11 @@ export function loadMapData(): MapData {
     population: number | null;
     population_year_sh: number | null;
     population_source: string | null;
+    population_admin: number | null;
+    population_wiki: number | null;
+    population_fda: number | null;
+    population_osm: number | null;
+    population_manual: number | null;
     lat: number;
     lon: number;
     pharmacy_real: number;
@@ -413,6 +424,7 @@ export function loadMapData(): MapData {
   }>(`
     SELECT area_id, kind, name, county, bakhsh, dehestan, population,
            population_year_sh, population_source, lat, lon,
+           population_admin, population_wiki, population_fda, population_osm, population_manual,
            pharmacy_real, pharmacy_legal, pharmacy_total, n_fda_rows, pharmacy_mapped,
            pharmacy_assigned,
            straight_km, net_km, road_km, road_minutes, est_km, dist_source,
@@ -437,6 +449,11 @@ export function loadMapData(): MapData {
     pop: r.population,
     popYear: r.population_year_sh,
     popSource: r.population_source,
+    popAdmin: r.population_admin,
+    popWiki: r.population_wiki,
+    popFda: r.population_fda,
+    popOsm: r.population_osm,
+    popManual: r.population_manual,
     lat: r4(r.lat),
     lon: r4(r.lon),
     ph: Math.max(r.pharmacy_total, r.pharmacy_assigned),
