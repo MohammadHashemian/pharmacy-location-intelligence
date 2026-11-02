@@ -402,6 +402,35 @@ without touching the grid, and the map recolours:
 Ahvaz (1.2 M) is saturated and absent from the «room» ranking, the benchmark dial moves the
 saturated count 83 → 32 and back, and the map draws all four colours.
 
+### Density at street scale (`density_cell`, 200 m)
+
+The old density was a settlement number painted over a 1 km grid, and supply was counted per
+settlement — so a block with several pharmacies read «saturated» while a city with 341
+registered shops showed **90,000 residents per pharmacy**.
+
+`etl/density_grid.py` writes a 0.002° grid (≈ 200 m) over the built-up mask, with two windowed
+quantities per cell over an **800 m walk**:
+
+```
+pop800 = residents living within 800 m      (population disaggregated onto built cells only)
+ph800  = pharmacies within 800 m            (FDA register spread over each settlement's own
+                                             built cells + every live pin)
+ratio  = pop800 / ph800                    residents per pharmacy at that corner
+         ph800 = 0 → unserved, drawn grey
+```
+
+Measured: **79,989 cells**, median **536** residents per pharmacy, p90 2,769, **2,140 cells**
+above the 5,408 benchmark, **48,475 unserved**. The centre of اهواز lands at **≈ 3,997 with 13
+shops in 800 m** — under capacity, which is the opposite of what the coarse layer claimed.
+
+The map fetches cells for the viewport (`/api/density?bbox=…`, ~3,000 rows per screen) instead of
+shipping 80,000 with the page, and the «تراکم» mode draws them with a legend that names the
+radius, the cell size and the bands.
+
+`tools/test_density_fine.py`: grid is street-scale, the capital is not absurd, nothing exceeds
+60,000 residents per pharmacy, unserved cells carry no shops, the endpoint stays under 15,000
+rows, the layer draws and more than one band is present.
+
 ### Population is a range, not a floor
 
 The candidate filter offered «هر جمعیتی / ≥ ۱٬۰۰۰ / ≥ ۵٬۰۰۰ / ≥ ۲۰٬۰۰۰» — a floor only, so the

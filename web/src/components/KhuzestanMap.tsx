@@ -830,6 +830,29 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const selectedIdx = selected === null ? undefined : indexOf.get(selected);
   const selectedS = selectedIdx === undefined ? null : settlements[selectedIdx];
   /* which source currently wins the number the analysis uses */
+  /* Fine density: 200 m cells, residents per pharmacy within an 800 m walk. Fetched for the
+     viewport rather than shipped with the page — 80,000 cells is a province, not a screen. */
+  const [fine, setFine] = useState<{
+    cells: [number, number, number, number, number][]; benchmark: number;
+  } | null>(null);
+  const fineBox = useRef("");
+  useEffect(() => {
+    if (mode !== "dens" || !layers.density || view.k < 1.6) return;
+    const vb = visibleBox();
+    const [la1, lo1] = scene.inv((vb.x0 - view.tx) / view.k, (vb.y0 - view.ty) / view.k);
+    const [la2, lo2] = scene.inv((vb.x1 - view.tx) / view.k, (vb.y1 - view.ty) / view.k);
+    const key = [la1, lo1, la2, lo2].map((v) => v.toFixed(3)).join(",");
+    if (key === fineBox.current) return;
+    const t = setTimeout(() => {
+      fineBox.current = key;
+      fetch(`/api/density?bbox=${[la1, lo1, la2, lo2].map((v) => v.toFixed(4)).join(",")}`)
+        .then((r) => r.json())
+        .then((d) => setFine({ cells: d.cells ?? [], benchmark: d.benchmark ?? 5408 }))
+        .catch(() => {});
+    }, 260);
+    return () => clearTimeout(t);
+  }, [mode, layers.density, view.k, view.tx, view.ty, scene]);
+
   const checkedSet = useMemo(() => new Set(data.checked), [data.checked]);
   const toggleCheck = async (kind: "settlement" | "hood", ref: string | number, on: boolean) => {
     await fetch("/api/checks", {
@@ -2019,6 +2042,9 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     return { located, residual, expected, placed };
   }, [data.pharmacies, settlements]);
 
+  /* the old 1 km wash is only drawn for the other modes now; «تراکم» uses the fine cells */
+  const showCoarseWash = mode !== "dens";
+
   const fineCells = useMemo(() => {
     if (settled.k < 1.2) return null;
     /* The screen's own box, not the viewBox: in full screen the map is cropped with
@@ -2979,7 +3005,34 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <g data-layer="roads">{roadLayer}</g>
               <g data-layer="connectors">{connectorLayer}</g>
               {layers.density && view.k < 1.2 ? cellLayer : null}
-              {layers.density && fineCells ? (
+              {mode === "dens" && layers.density && fine && view.k >= 1.6 ? (
+                <g data-layer="density-fine" clipPath="url(#provClip)">
+                  {fine.cells.map(([lat, lon, ratio, ph, unserved], i) => {
+                    const [x, y] = scene.proj(lat, lon);
+                    const w = 0.002 * scene.kx;
+                    const h = 0.002 * scene.scale;
+                    const t = ratio / Math.max(1, fine.benchmark);
+                    const fill = unserved
+                      ? "#94a3b8"
+                      : t < 0.5 ? "#0f766e" : t < 1 ? "#65a30d" : t < 1.6 ? "#f59e0b" : "#dc2626";
+                    return (
+                      <rect
+                        key={i}
+                        x={x - w / 2}
+                        y={y - h / 2}
+                        width={w + 0.2}
+                        height={h + 0.2}
+                        fill={fill}
+                        fillOpacity={0.72}
+                      >
+                        <title>{`${Math.round(ratio)} نفر به ازای هر داروخانه · ${ph} داروخانه در ۸۰۰ متر${unserved ? " · بدون داروخانه" : ""}`}</title>
+                      </rect>
+                    );
+                  })}
+                </g>
+              ) : null}
+
+              {showCoarseWash && layers.density && fineCells ? (
                 <g
                   data-layer="density"
                   shapeRendering="crispEdges"
@@ -2997,23 +3050,19 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                          pharmacies" used to look identical: grey = residential
                          with no mapped supply, teal = supply, nothing = no data. */
                       fill={
-                        mode === "dens" && c.v <= 0
+                        c.v <= 0
                           ? layers.sat
                             ? "none"
                             : "#e2e8f0"
                           : ramp(
-                              mode === "dens"
-                                ? DENS_RAMP
-                                : mode === "gap"
-                                  ? GAP_RAMP
-                                  : RATIO_RAMP,
+                              mode === "gap" ? GAP_RAMP : RATIO_RAMP,
                               Math.min(1, c.v / fineCells.cap),
                             )
                       }
                       fillOpacity={
                         /* on imagery the grey «no supply» wash covered exactly the
                            built-up blocks the photo was opened to show */
-                        mode === "dens" && c.v <= 0
+                        c.v <= 0
                           ? 0
                           : ((view.k >= 4.5 ? 0.17 : 0.35) +
                               0.45 * Math.min(1, c.v / fineCells.cap)) *
@@ -3888,6 +3937,34 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="flex h-2 w-24 overflow-hidden rounded-full">
+              {mode === "dens" ? (
+                <div
+                  data-legend="fine-density"
+                  className="pointer-events-none absolute bottom-2 right-2 z-20 rounded-xl border border-line bg-surface/95 px-2.5 py-2 text-[10px] shadow-lg"
+                >
+                  <div className="mb-1 font-semibold text-ink">نفر به ازای هر داروخانه</div>
+                  <div className="flex items-center gap-1.5">
+                    {[
+                      ["#14b8a6", `زیر ${Math.round((fine?.benchmark ?? 5408) / 2).toLocaleString("fa-IR")}`],
+                      ["#65a30d", `تا ${(fine?.benchmark ?? 5408).toLocaleString("fa-IR")}`],
+                      ["#f59e0b", `تا ${Math.round((fine?.benchmark ?? 5408) * 1.6).toLocaleString("fa-IR")}`],
+                      ["#dc2626", "بیشتر"],
+                    ].map(([c, l], i) => (
+                      <span key={i} className="flex flex-col items-center gap-0.5">
+                        <span className="inline-block h-3 w-5 rounded-sm" style={{ backgroundColor: c }} />
+                        <span className="text-[7.5px] text-muted">{l}</span>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="mt-1 text-[9px] text-muted">
+                    شعاع ۸۰۰ متر · هر سلول ۲۰۰ متر · مبنا {fine ? fine.benchmark.toLocaleString("fa-IR") : "—"} نفر
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1 text-[9px] text-muted">
+                    <span className="inline-block h-2 w-3 rounded-sm bg-[#94a3b8]" /> بدون داروخانه در ۸۰۰ متر
+                  </div>
+                </div>
+              ) : null}
+
               {mode === "opp" ? (
                 <div className="flex items-center gap-2 text-[10px] text-muted">
                   <span>تقاضای بدون پوشش:</span>
