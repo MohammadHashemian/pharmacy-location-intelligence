@@ -37,7 +37,7 @@ def main() -> int:
                    if p.get("lat") is not None]
             if len(pts) < 2:
                 continue
-            simple = rdp(pts, 0.0002)          # ~20 m: context, not navigation
+            simple = rdp(pts, 0.0003)          # ~33 m: context, not navigation; 3.9 → ~2.6 MB
             if len(simple) < 2:
                 continue
             feats.append({

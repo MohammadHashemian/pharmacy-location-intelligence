@@ -39,9 +39,12 @@ DB = os.path.join(HOME, "db", "pharmacy.sqlite")
 API = "https://openrouter.ai/api/v1/chat/completions"
 ROLES = [PHARMACY, DOCTOR, CLINIC, DENTIST, HOSPITAL, LAB, IRRELEVANT, UNKNOWN]
 FLOOR = 0.85
+# A row already sitting in the pharmacy table is weak evidence for «pharmacy»; a row in the
+# medical table is weak evidence against it. Neither is proof, so both still need the model
+# to be sure — the prior only decides what the model is shown, never what is applied.
 
 SYSTEM = """You label places in Iran for a pharmacy site-selection tool.
-Given a JSON array of places (id, name, address), return ONLY a JSON array, same order:
+Given a JSON array of places (i, name, address, table), return ONLY a JSON array, same order:
 [{"i": <id>, "role": "<one of: pharmacy|doctor|clinic|dentist|hospital|lab|irrelevant|unknown>", "confidence": <0..1>}]
 
 Rules:
@@ -52,6 +55,16 @@ Rules:
 - irrelevant: not a medical business at all — tire shop, supermarket, cosmetics, insurance office, equipment seller, factory, a street or an address with no business name.
 - unknown: the name carries no usable signal and the address does not help.
 Judge by meaning, not by a keyword: «کلینیک سوم خرداد بیمه تامین اجتماعی» is a clinic, «تجهیزات پزشکی آلا» is irrelevant.
+
+Names are Persian, English, or transliterations. «Eczanesi»/«Eczane» is Turkish for pharmacy.
+«Dr. X» with no other word is a person: a pharmacy only if the table is pharmacy and the town
+has no better reading — otherwise doctor.
+
+Calibration — do not return 0.8 for everything:
+- 0.95: the name states the category (داروخانه …, درمانگاه …, بیمارستان …, آز …).
+- 0.90: a strong, unambiguous form («دکتر X» in the pharmacy table, «مطب دکتر X»).
+- 0.75-0.85: the name is a plausible business but the category is inferred.
+- <=0.5: genuinely undecidable; say «unknown» rather than guess.
 Output JSON only, no prose, no code fences."""
 
 
@@ -74,8 +87,10 @@ def ensure_table(c: sqlite3.Connection) -> None:
     )""")
 
 
-def candidates(c: sqlite3.Connection, model: str) -> list[dict]:
-    """Rows the rules cannot settle, minus the ones already judged by this model."""
+def candidates(c: sqlite3.Connection, model: str, audit: bool = False) -> list[dict]:
+    """Rows the rules cannot settle — or, with `audit`, every row: the rules were
+    confidently wrong before («پنچر گیری» filed as a medical service), so their positive
+    verdicts need checking too."""
     done = {(r[0], r[1]) for r in c.execute(
         "SELECT src, ref FROM poi_classification WHERE model = ?", (model,))}
     out: list[dict] = []
@@ -83,14 +98,14 @@ def candidates(c: sqlite3.Connection, model: str) -> list[dict]:
                        "FROM map_pharmacy"):
         if len((r["name"] or "").strip()) < 2:
             continue          # nothing to judge: an unnamed pin cannot be reasoned about
-        if classify(r["name"], (), r["addr"] or "")["role"] != PHARMACY:
+        if audit or classify(r["name"], (), r["addr"] or "")["role"] != PHARMACY:
             if ("map_pharmacy", r["ref"]) not in done:
                 out.append({"src": "map_pharmacy", "ref": r["ref"], "name": r["name"] or "",
                             "addr": r["addr"] or ""})
     for r in c.execute("SELECT CAST(id AS TEXT) AS ref, name, address AS addr FROM map_medical"):
         if len((r["name"] or "").strip()) < 2:
             continue
-        if classify(r["name"], (), r["addr"] or "")["role"] not in MEDICAL_ROLES:
+        if audit or classify(r["name"], (), r["addr"] or "")["role"] not in MEDICAL_ROLES:
             if ("map_medical", r["ref"]) not in done:
                 out.append({"src": "map_medical", "ref": r["ref"], "name": r["name"] or "",
                             "addr": r["addr"] or ""})
@@ -122,7 +137,8 @@ def ask(key: str, model: str, items: list[dict], timeout: int = 120) -> str:
         "messages": [
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": json.dumps(
-                [{"i": i, "name": it["name"], "address": it["addr"]}
+                [{"i": i, "name": it["name"], "address": it["addr"],
+                  "table": "pharmacy" if it["src"] == "map_pharmacy" else "medical"}
                  for i, it in enumerate(items)], ensure_ascii=False)},
         ],
     }).encode()
@@ -163,6 +179,17 @@ def apply_rows(c: sqlite3.Connection, model: str) -> tuple[int, int, int]:
                 c.execute("UPDATE map_medical SET kind = ? WHERE CAST(id AS TEXT) = ?",
                           (role, ref))
                 fixed += 1
+            elif role == PHARMACY:
+                r = c.execute("SELECT name, lat, lon, nearest_area_id, nearest_km, county, address "
+                              "FROM map_medical WHERE CAST(id AS TEXT) = ?", (ref,)).fetchone()
+                if r:
+                    c.execute("""INSERT OR IGNORE INTO map_pharmacy
+                        (osm_type, osm_id, name, lat, lon, nearest_area_id, nearest_km,
+                         county, street, source, external_id)
+                        VALUES ('poi', ?, ?, ?, ?, ?, ?, ?, ?, 'llm', ?)""",
+                              (ref, r[0], r[1], r[2], r[3], r[4], r[5], r[6], ref))
+                    moved += 1
+                c.execute("DELETE FROM map_medical WHERE CAST(id AS TEXT) = ?", (ref,))
             elif role == IRRELEVANT:
                 c.execute("DELETE FROM map_medical WHERE CAST(id AS TEXT) = ?", (ref,))
                 dropped += 1
@@ -196,6 +223,8 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true", help="move/delete after judging")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--batch", type=int, default=25)
+    ap.add_argument("--audit", action="store_true",
+                    help="re-judge rows the rules already accepted, not just the residue")
     ap.add_argument("--check", action="store_true")
     args = ap.parse_args()
 
@@ -221,7 +250,7 @@ def main() -> int:
         print("missing openrouter_api_key / openrouter_model in app_setting — set them in /settings")
         return 1
 
-    todo = candidates(c, model)
+    todo = candidates(c, model, audit=args.audit)
     if args.limit:
         todo = todo[: args.limit]
     if not todo:
@@ -246,7 +275,7 @@ def main() -> int:
                          (src, ref, name, role, confidence, model, prompt_v)
                          VALUES (?,?,?,?,?,?,?)""",
                       (it["src"], it["ref"], it["name"], r["role"], r["confidence"],
-                       model, "v1"))
+                       model, "v2"))   # v2: source table + calibration; purge v1 before a run
         c.commit()
         saved += len(rows)
         print(f"  batch {start//args.batch + 1}: {len(rows)} verdicts", flush=True)

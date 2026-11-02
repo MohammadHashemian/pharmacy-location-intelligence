@@ -371,6 +371,34 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### The LLM audit: what the rules were confidently wrong about
+
+The rules are the first pass, not the last word. `python etl/classify_with_llm.py --run --audit`
+sends **every** row to the model — including the ones the rules accepted — because a
+keyword rule that says «داروخانه» cannot know that «داروخانه دامپزشکی» is a veterinary
+chemist and «داروخانه گیاهپزشکی» sells crop spray.
+
+Result over 1,223 rows: **1,207 verdicts above the 0.85 floor (93 %**, against 1 in 10
+before the prompt carried the source table and a calibration scale).
+
+```
+applied: 5 moved to medical · 756 re-affirmed · 47 deleted
+map_pharmacy 460 → 428 · map_medical 880 → 865
+```
+
+What it removed: 12 veterinary/herbal «pharmacies» (دامپزشکی، گیاهپزشکی), herbalists, and
+shops named after a customer rather than a business. What it rescued: real pharmacies that
+had been filed as medical — `Dr.Zerafatfard Pharmcy`, `داروخانه دکتر راسخ`,
+`داروخانه دکتر سردارزاده` — i.e. supply we were not counting when ranking sites.
+
+Two durable consequences, so the model is not needed twice for the same mistake:
+
+* `دامپزشکی` was already a hard negative; `گیاهپزشکی` was added, and `reclassify_places.py`
+  now agrees with the model (**0 further deletions**) — rules and LLM are in sync.
+* the prompt carries the source table as prior and a calibration scale, so «Dr. Kazemi»
+  scores 0.90 instead of 0.80. A model that answers 0.8 for everything is a model you
+  cannot threshold.
+
 ### Village lanes: the other half of the street network (`etl/build_rural_streets.py`)
 
 Half of OSM's residential ways in خوزستان lie outside every city disc, so no file contained
