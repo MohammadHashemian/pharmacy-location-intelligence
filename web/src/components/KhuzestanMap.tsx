@@ -3239,9 +3239,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                   onChange={(e) => setMarkPriority(Number(e.target.value))}
                   className="rounded-md border border-line-strong bg-surface-2 px-1 py-0.5 text-[11px] text-ink"
                 >
-                  <option value={1}>۱ — اول</option>
-                  <option value={2}>۲</option>
-                  <option value={3}>۳ — آخر</option>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+                    <option key={n} value={n}>
+                      {n === 1 ? "۱ — اول" : n === 9 ? "۹ — آخر" : toPersianDigits(n)}
+                    </option>
+                  ))}
                 </select>
               </label>
               <div className="mt-1.5 flex items-center gap-1.5">
@@ -3794,6 +3796,14 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           }}
           onRemove={async (p) => {
             await fetch(`/api/prospects?id=${p.id}`, { method: "DELETE" });
+            router.refresh();
+          }}
+          onPriority={async (p, next) => {
+            await fetch("/api/prospects", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: p.id, priority: next }),
+            });
             router.refresh();
           }}
         />

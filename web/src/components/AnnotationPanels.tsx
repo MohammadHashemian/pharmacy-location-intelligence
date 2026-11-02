@@ -6,6 +6,7 @@
  * Both are scoped to the signed-in user's id (one seeded owner until auth exists), so the
  * work survives a reload and will survive multiple accounts when they arrive.
  */
+import { useState } from "react";
 import type { Measurement, Prospect, SurveyArea } from "@/lib/map";
 import { group, num } from "@/lib/format";
 
@@ -24,70 +25,125 @@ export function VisitPanel({
   onFocus,
   onCycle,
   onRemove,
+  onPriority,
 }: {
   items: Prospect[];
   onFocus: (p: Prospect) => void;
   onCycle: (p: Prospect) => void;
   onRemove: (p: Prospect) => void;
+  /** reorder the trip: priority is 1-9 and the list has no size limit */
+  onPriority: (p: Prospect, next: number) => void;
 }) {
+  const [filter, setFilter] = useState<"all" | Prospect["status"]>("all");
+  const [q, setQ] = useState("");
+
   const todo = items.filter((p) => p.status === "todo").length;
+  const shown = items
+    .filter((p) => (filter === "all" ? true : p.status === filter))
+    .filter((p) => (q.trim() ? (p.name + " " + (p.note ?? "")).includes(q.trim()) : true));
+
   return (
-    <div className="rounded-2xl border border-line bg-surface p-2.5">
+    <div data-panel="visit" className="rounded-2xl border border-line bg-surface p-2.5">
       <div className="mb-1.5 flex items-center justify-between">
         <span className="text-[12px] font-semibold text-ink">فهرست بازدید</span>
         <span className="tnum text-[10px] text-faint">
           {group(items.length)} مکان · {group(todo)} در انتظار
         </span>
       </div>
-      {items.length === 0 ? (
-        <p className="text-[10.5px] leading-5 text-muted">
-          روی نقشه جایی را که باید ببینید «نشان‌گذاری» کنید تا این فهرست پر شود؛ با هر کلیک
-          وضعیتش را عوض کنید.
-        </p>
-      ) : (
-        <ul className="max-h-52 space-y-1 overflow-auto">
-          {items.map((p) => {
-            const st = STATUS.find((s) => s.id === p.status)!;
-            return (
-              <li
-                key={p.id}
-                className="flex items-center gap-1 rounded-lg border border-line/70 px-1.5 py-1"
+
+      {items.length ? (
+        <>
+          <div className="mb-1 flex flex-wrap items-center gap-1">
+            {(
+              [
+                ["all", `همه ${group(items.length)}`],
+                ["todo", `در انتظار ${group(todo)}`],
+                ["visited", "بازدید‌شده"],
+                ["rejected", "رد‌شده"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setFilter(id as typeof filter)}
+                className={`rounded-md border px-1.5 py-0.5 text-[9.5px] ${
+                  filter === id
+                    ? "border-accent/40 bg-accent-soft text-accent"
+                    : "border-line-strong bg-surface text-muted"
+                }`}
               >
-                <span className="tnum w-4 shrink-0 text-[9px] text-faint">{p.priority}</span>
-                <button
-                  type="button"
-                  onClick={() => onFocus(p)}
-                  className="min-w-0 flex-1 text-right"
-                  title="نمایش روی نقشه"
+                {label}
+              </button>
+            ))}
+            {items.length > 6 ? (
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="جستجو در فهرست…"
+                className="min-w-0 flex-1 rounded-md border border-line-strong bg-surface-2 px-1.5 py-0.5 text-[9.5px] text-ink placeholder:text-faint"
+              />
+            ) : null}
+          </div>
+
+          <ul className="max-h-72 space-y-1 overflow-auto">
+            {shown.map((p) => {
+              const st = STATUS.find((s) => s.id === p.status)!;
+              return (
+                <li
+                  key={p.id}
+                  className="flex items-center gap-1 rounded-lg border border-line/70 px-1.5 py-1"
                 >
-                  <span className="block truncate text-[10.5px] font-medium text-ink">
-                    {p.name}
-                  </span>
-                  {p.note ? (
-                    <span className="block truncate text-[9px] text-faint">{p.note}</span>
-                  ) : null}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onCycle(p)}
-                  className={`shrink-0 rounded px-1 py-0.5 text-[9px] ${st.tone}`}
-                  title="تغییر وضعیت"
-                >
-                  {st.label}
-                </button>
-                <button
-                  type="button"
-                  data-del={`prospect-${p.id}`}
-                  onClick={() => onRemove(p)}
-                  className="shrink-0 rounded border border-line-strong px-1 text-[9px] text-danger"
-                  title="حذف"
-                >
-                  ×
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                  <button
+                    type="button"
+                    onClick={() => onPriority(p, p.priority >= 9 ? 1 : p.priority + 1)}
+                    title="اولویت سفر را عوض کنید (۱ تا ۹)"
+                    className="tnum w-4 shrink-0 rounded text-[9px] text-faint hover:bg-surface-2 hover:text-ink"
+                  >
+                    {p.priority}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onFocus(p)}
+                    className="min-w-0 flex-1 text-right"
+                    title="نمایش روی نقشه"
+                  >
+                    <span className="block truncate text-[10.5px] font-medium text-ink">
+                      {p.name}
+                    </span>
+                    {p.note ? (
+                      <span className="block truncate text-[9px] text-faint">{p.note}</span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onCycle(p)}
+                    className={`shrink-0 rounded px-1 py-0.5 text-[9px] ${st.tone}`}
+                    title="تغییر وضعیت"
+                  >
+                    {st.label}
+                  </button>
+                  <button
+                    type="button"
+                    data-del={`prospect-${p.id}`}
+                    onClick={() => onRemove(p)}
+                    className="shrink-0 rounded border border-line-strong px-1 text-[9px] text-danger"
+                    title="حذف"
+                  >
+                    ×
+                  </button>
+                </li>
+              );
+            })}
+            {!shown.length ? (
+              <li className="py-2 text-center text-[10px] text-faint">چیزی در این فیلتر نیست</li>
+            ) : null}
+          </ul>
+        </>
+      ) : (
+        <p className="text-[10.5px] leading-5 text-muted">
+          روی نقشه جایی را که باید ببینید «نشان‌گذاری» کنید تا این فهرست پر شود؛ تعدادش محدود
+          نیست و با اولویت ۱ تا ۹ مرتب می‌شود.
+        </p>
       )}
     </div>
   );
@@ -104,7 +160,7 @@ export function SurveyPanel({
 }) {
   const totalKm2 = items.reduce((s, a) => s + (a.areaKm2 ?? 0), 0);
   return (
-    <div className="rounded-2xl border border-line bg-surface p-2.5">
+    <div data-panel="survey" className="rounded-2xl border border-line bg-surface p-2.5">
       <div className="mb-1.5 flex items-center justify-between">
         <span className="text-[12px] font-semibold text-ink">محدوده‌های بررسی‌شده</span>
         <span className="tnum text-[10px] text-faint">

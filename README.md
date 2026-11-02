@@ -371,6 +371,21 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### The watch list has no cap (`/api/prospects`)
+
+Reported as «I can only add 3 places». There was never a row limit — **priority was clamped
+to 1..3**, which read as «three places allowed». Priority now runs **1-9**, the list holds any
+number, and the panel stays usable as it grows:
+
+* status filters — همه / در انتظار / بازدید‌شده / رد‌شده — with counts;
+* a search box that appears once the list passes six entries;
+* the priority badge is a button: click it to move a place up or down the trip;
+* the list scrolls (max-h-72) instead of pushing the rest of the sidebar off screen.
+
+`tools/test_visitlist.py` creates 14 places (priorities up to 9), checks all 14 render, filters
+to the 3 visited ones, clicks a priority badge and verifies the database follows, then adds a
+15th while the page is open.
+
 ### Population: every source, and a manual override that wins (`/api/population`)
 
 The settlement card lists the four imported sources side by side — تقسیمات کشوری، ویکی‌پدیا،

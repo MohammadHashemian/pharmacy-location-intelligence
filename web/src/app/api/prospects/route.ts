@@ -10,7 +10,9 @@
  *   DELETE ?id=<id>
  *
  * Status is deliberately small: `todo` (go look), `visited` (been there), `rejected`
- * (checked, not viable). Priority 1-3 orders the trip.
+ * (checked, not viable). Priority is a trip order, 1-9, and there is **no cap on how many
+ * places the list holds** — the first version clamped priority to 1-3, which read as «only
+ * three places allowed».
  */
 import { NextResponse } from "next/server";
 import { all, one, run } from "@/lib/db";
@@ -62,7 +64,7 @@ export async function POST(req: Request) {
   const note = String(body.note ?? "").trim() || null;
   const status = STATUS.includes(body.status as (typeof STATUS)[number])
     ? (body.status as string) : "todo";
-  const priority = Math.min(3, Math.max(1, Math.round(Number(body.priority) || 2)));
+  const priority = Math.min(9, Math.max(1, Math.round(Number(body.priority) || 2)));
 
   if (name.length < 2 || name.length > 120) {
     return NextResponse.json({ error: "نام باید بین ۲ تا ۱۲۰ نویسه باشد" }, { status: 400 });
@@ -115,7 +117,7 @@ export async function PATCH(req: Request) {
   }
   if (body.priority !== undefined) {
     sets.push("priority = ?");
-    args.push(Math.min(3, Math.max(1, Math.round(Number(body.priority) || 2))));
+    args.push(Math.min(9, Math.max(1, Math.round(Number(body.priority) || 2))));
   }
   if (!sets.length) {
     return NextResponse.json({ ok: true, id, unchanged: true });
