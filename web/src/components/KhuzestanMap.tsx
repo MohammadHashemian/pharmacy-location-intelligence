@@ -34,6 +34,7 @@ import type { MapCell, MapData, MapSettlement, MapShape } from "@/lib/map";
 import { group, num, shortCounty, toPersianDigits } from "@/lib/format";
 import { PlacePanel } from "@/components/PharmacyPanel";
 import { ShortlistPanel } from "@/components/ShortlistPanel";
+import { VisitPanel, SurveyPanel, nextStatus } from "@/components/AnnotationPanels";
 
 const W = 660;
 const H = 820;
@@ -413,6 +414,8 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     streets: true,
     sat: false,
     sites: true,
+    prospects: true,
+    surveys: true,
   });
   const [targetPerPharm, setTargetPerPharm] = useState(
     Math.round((data.meta.residentsPerPharmacy || 5400) / 100) * 100,
@@ -704,6 +707,17 @@ export function KhuzestanMap({ data }: { data: MapData }) {
      `manual_pharmacy`, which no ETL run rewrites. */
   const router = useRouter();
   const [addMode, setAddMode] = useState(false);
+  /* ---- user-owned annotations: places to visit, and areas already walked ---- */
+  const [markMode, setMarkMode] = useState(false);
+  const [markPin, setMarkPin] = useState<{ lat: number; lon: number } | null>(null);
+  const [markName, setMarkName] = useState("");
+  const [markNote, setMarkNote] = useState("");
+  const [markPriority, setMarkPriority] = useState(2);
+  const [markBusy, setMarkBusy] = useState(false);
+  const [drawMode, setDrawMode] = useState(false);
+  const [drawPts, setDrawPts] = useState<[number, number][]>([]);
+  const [drawName, setDrawName] = useState("");
+  const [drawBusy, setDrawBusy] = useState(false);
   const [addPin, setAddPin] = useState<{ lat: number; lon: number } | null>(null);
   const [addKind, setAddKind] = useState<string>("pharmacy");
   /** Show only the pharmacies nobody named — the ones that still need a human look. */
@@ -1443,6 +1457,67 @@ export function KhuzestanMap({ data }: { data: MapData }) {
      is centred on is loaded, and only above ~5x. */
   /* Ranked places to open a pharmacy. Drawn as numbered badges because the order is
      the point: a star without a rank says nothing. */
+  /* Visited ground and places to visit: drawn under the sites and pharmacy layers so they
+     never hide a shop, but above the wash so the wash cannot hide them. */
+  const surveyLayer = useMemo(() => {
+    if (!layers.surveys || !data.surveys.length) return null;
+    return (
+      <g data-layer="surveys">
+        {data.surveys.map((a) => {
+          const pts = a.points.map(([la, lo]) => scene.proj(la, lo));
+          if (pts.length < 3) return null;
+          const d = `M${pts.map(([x, y]) => `${x} ${y}`).join(" L")} Z`;
+          const [cx, cy] = [pts.reduce((t, p) => t + p[0], 0) / pts.length,
+                            pts.reduce((t, p) => t + p[1], 0) / pts.length];
+          return (
+            <g key={a.id} data-survey={a.id}>
+              <path d={d} fill="#0ea5e9" fillOpacity={0.16} stroke="none" />
+              <path d={d} fill="url(#surveyHatch)" stroke="#0369a1"
+                    strokeWidth={2.4 / view.k} strokeDasharray={`${7 / view.k} ${4 / view.k}`} />
+              <text x={cx} y={cy} textAnchor="middle" fontSize={10 / view.k} fontWeight={700}
+                    fill="#075985" paintOrder="stroke" stroke="#ffffff"
+                    strokeWidth={2.2 / view.k} pointerEvents="none">
+                {a.name}
+              </text>
+            </g>
+          );
+        })}
+      </g>
+    );
+  }, [layers.surveys, data.surveys, scene, view.k]);
+
+  const prospectLayer = useMemo(() => {
+    if (!layers.prospects || !data.prospects.length) return null;
+    const tone = (s: string) =>
+      s === "visited" ? "#16a34a" : s === "rejected" ? "#94a3b8" : "#d97706";
+    return (
+      <g data-layer="prospects">
+        {data.prospects.map((p) => {
+          const [x, y] = scene.proj(p.lat, p.lon);
+          const r = 6 / view.k;
+          return (
+            <g key={p.id} data-prospect={p.id} className="cursor-pointer"
+               onClick={(e) => {
+                 e.stopPropagation();
+                 flyLatLon(p.lat, p.lon, 15);
+               }}>
+              {/* flag on a pole: nothing else on this map has that silhouette */}
+              <line x1={x} y1={y} x2={x} y2={y - r * 2.6} stroke="#334155" strokeWidth={1.4 / view.k} />
+              <path d={`M${x} ${y - r * 2.6} L${x + r * 2.2} ${y - r * 2.0} L${x} ${y - r * 1.4} Z`}
+                    fill={tone(p.status)} stroke="#334155" strokeWidth={1 / view.k} />
+              <circle cx={x} cy={y} r={1.6 / view.k} fill="#334155" />
+              <text x={x} y={y - r * 3.2} textAnchor="middle" fontSize={7.5 / view.k}
+                    fontWeight={700} fill="#0f172a" paintOrder="stroke" stroke="#ffffff"
+                    strokeWidth={2 / view.k} pointerEvents="none">
+                {p.priority}
+              </text>
+            </g>
+          );
+        })}
+      </g>
+    );
+  }, [layers.prospects, data.prospects, scene, view.k]);
+
   const siteLayer = useMemo(() => {
     if (onlyUnnamed) return null;
     if (!layers.sites || !data.sites.length) return null;
@@ -2245,6 +2320,8 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                     ["osm", "داروخانه‌های نقشه"],
                     ["sat", "تصویر ماهواره‌ای"],
                     ["sites", "پیشنهادهای مکانی"],
+                    ["prospects", "فهرست بازدید"],
+                    ["surveys", "محدوده‌های بررسی‌شده"],
                   ] as const
                 ).map(([id, label]) => (
                   <label
@@ -2392,6 +2469,46 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             >
               {addMode ? "روی نقشه کلیک کنید…" : "افزودن"}
             </button>
+            <button
+              type="button"
+              aria-label="نشان‌گذاری مکان"
+              onClick={() => {
+                setMarkMode((v) => !v);
+                setMarkPin(null);
+                setDrawMode(false);
+                setDrawPts([]);
+                setAddMode(false);
+                setProbeMode(false);
+              }}
+              title="مکانی که باید بروید و از نزدیک ببینید را روی نقشه علامت بزنید"
+              className={`shrink-0 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition ${
+                markMode
+                  ? "border-accent/50 bg-accent-soft text-accent"
+                  : "border-line bg-surface text-muted hover:text-ink"
+              }`}
+            >
+              {markMode ? "روی نقشه کلیک کنید…" : "نشان‌گذاری"}
+            </button>
+            <button
+              type="button"
+              aria-label="کشیدن محدوده"
+              onClick={() => {
+                setDrawMode((v) => !v);
+                setDrawPts([]);
+                setDrawName("");
+                setMarkMode(false);
+                setAddMode(false);
+                setProbeMode(false);
+              }}
+              title="محدوده‌ای که قبلاً گشته‌اید را دور بکشید تا دوباره بررسی نشود"
+              className={`shrink-0 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition ${
+                drawMode
+                  ? "border-[#0284c7]/50 bg-[#0ea5e9]/15 text-[#075985]"
+                  : "border-line bg-surface text-muted hover:text-ink"
+              }`}
+            >
+              {drawMode ? `${drawPts.length} نقطه…` : "کشیدن محدوده"}
+            </button>
           </div>
         </div>
 
@@ -2448,6 +2565,18 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 }
                 return;
               }
+              if (markMode) {
+                const [px, py] = toScene(e.clientX, e.clientY);
+                const [la, lo] = scene.inv(px, py);
+                setMarkPin({ lat: la, lon: lo });
+                return;
+              }
+              if (drawMode) {
+                const [px, py] = toScene(e.clientX, e.clientY);
+                const [la, lo] = scene.inv(px, py);
+                setDrawPts((pts) => [...pts, [la, lo]]);
+                return;
+              }
               if (addMode) {
                 const [px, py] = toScene(e.clientX, e.clientY);
                 const [la, lo] = scene.inv(px, py);
@@ -2474,6 +2603,13 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             }}
           >
             <defs>
+              {/* A wash alone reads as map shading. A hatch says «marked by a person» —
+                  this is ground somebody has already walked. */}
+              <pattern id="surveyHatch" width="9" height="9" patternUnits="userSpaceOnUse"
+                       patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="9" stroke="#0369a1" strokeOpacity="0.35"
+                      strokeWidth="2.2" />
+              </pattern>
               <clipPath id="provClip">
                 <path d={scene.bakhsh.map((b) => b.d).join(" ")} />
               </clipPath>
@@ -2625,7 +2761,33 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               <g data-layer="settlements">{onlyUnnamed ? null : dotLayer}</g>
               <g data-layer="medical">{medicalLayer}</g>
               <g data-layer="pharmacy">{pharmacyLayer}</g>
+              {surveyLayer}
               <g data-layer="sites">{siteLayer}</g>
+              {prospectLayer}
+
+              {drawPts.length ? (
+                <g pointerEvents="none" data-layer="draw-preview">
+                  <path
+                    d={
+                      drawPts.length > 1
+                        ? `M${drawPts.map(([la, lo]) => scene.proj(la, lo).join(" ")).join(" L")}`
+                        : ""
+                    }
+                    fill="none" stroke="#0284c7" strokeWidth={2 / view.k}
+                    strokeDasharray={`${5 / view.k} ${4 / view.k}`}
+                  />
+                  {drawPts.map(([la, lo], i) => {
+                    const [x, y] = scene.proj(la, lo);
+                    return <circle key={i} cx={x} cy={y} r={3.5 / view.k} fill="#0284c7" />;
+                  })}
+                  {drawPts.length > 2 ? (
+                    <path
+                      d={`M${drawPts.map(([la, lo]) => scene.proj(la, lo).join(" ")).join(" L")} Z`}
+                      fill="#0ea5e9" fillOpacity={0.12} stroke="none"
+                    />
+                  ) : null}
+                </g>
+              ) : null}
 
               {addPin ? (
                 <g pointerEvents="none">
@@ -2870,6 +3032,141 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               </div>
             );
           })() : null}
+
+          {markMode && markPin ? (
+            <div className="absolute bottom-2 right-2 z-30 w-[276px] max-w-[86vw] rounded-xl border border-accent/40 bg-surface p-2.5 text-[11px] shadow-xl">
+              <div className="flex items-center justify-between gap-2">
+                <b className="text-[12px] text-ink">مکان برای بازدید</b>
+                <span className="text-[9.5px] text-faint">
+                  <bdi dir="ltr">{markPin.lat.toFixed(5)}, {markPin.lon.toFixed(5)}</bdi>
+                </span>
+              </div>
+              <input
+                autoFocus
+                value={markName}
+                onChange={(e) => setMarkName(e.target.value)}
+                placeholder="نام مکان (مثلاً نبش خیابان …)"
+                className="mt-1.5 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11.5px] text-ink placeholder:text-faint"
+              />
+              <input
+                value={markNote}
+                onChange={(e) => setMarkNote(e.target.value)}
+                placeholder="یادداشت: اجاره، متراژ، تماس…"
+                className="mt-1 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11px] text-ink placeholder:text-faint"
+              />
+              <label className="mt-1 flex items-center gap-1.5 text-[10.5px] text-muted">
+                اولویت سفر
+                <select
+                  value={markPriority}
+                  onChange={(e) => setMarkPriority(Number(e.target.value))}
+                  className="rounded-md border border-line-strong bg-surface-2 px-1 py-0.5 text-[11px] text-ink"
+                >
+                  <option value={1}>۱ — اول</option>
+                  <option value={2}>۲</option>
+                  <option value={3}>۳ — آخر</option>
+                </select>
+              </label>
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={markBusy || markName.trim().length < 2}
+                  onClick={async () => {
+                    setMarkBusy(true);
+                    await fetch("/api/prospects", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        name: markName,
+                        lat: markPin.lat,
+                        lon: markPin.lon,
+                        note: markNote,
+                        priority: markPriority,
+                      }),
+                    });
+                    setMarkBusy(false);
+                    setMarkName("");
+                    setMarkNote("");
+                    setMarkPin(null);
+                    setMarkMode(false);
+                    router.refresh();
+                  }}
+                  className="rounded-lg border border-accent bg-accent px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-40"
+                >
+                  {markBusy ? "…" : "افزودن به فهرست"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMarkPin(null);
+                    setMarkName("");
+                    setMarkNote("");
+                  }}
+                  className="rounded-lg border border-line-strong bg-surface px-2 py-1 text-[11px] text-muted"
+                >
+                  لغو
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {drawMode ? (
+            <div className="absolute bottom-2 right-2 z-30 w-[276px] max-w-[86vw] rounded-xl border border-[#0284c7]/40 bg-surface p-2.5 text-[11px] shadow-xl">
+              <div className="flex items-center justify-between gap-2">
+                <b className="text-[12px] text-ink">محدودهٔ بررسی‌شده</b>
+                <span className="tnum text-[9.5px] text-faint">{drawPts.length} نقطه</span>
+              </div>
+              <p className="mt-1 text-[10px] leading-4 text-muted">
+                روی نقشه کلیک کنید تا گوشه‌ها را ببندید؛ از سه نقطه به بعد قابل ثبت است.
+              </p>
+              <input
+                value={drawName}
+                onChange={(e) => setDrawName(e.target.value)}
+                placeholder="نام محله یا محدوده"
+                className="mt-1.5 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11.5px] text-ink placeholder:text-faint"
+              />
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={drawBusy || drawPts.length < 3 || drawName.trim().length < 2}
+                  onClick={async () => {
+                    setDrawBusy(true);
+                    await fetch("/api/surveys", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ name: drawName, points: drawPts }),
+                    });
+                    setDrawBusy(false);
+                    setDrawPts([]);
+                    setDrawName("");
+                    setDrawMode(false);
+                    router.refresh();
+                  }}
+                  className="rounded-lg border border-[#0284c7] bg-[#0284c7] px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-40"
+                >
+                  {drawBusy ? "…" : "ثبت محدوده"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDrawPts((p) => p.slice(0, -1))}
+                  disabled={!drawPts.length}
+                  className="rounded-lg border border-line-strong bg-surface px-2 py-1 text-[11px] text-muted disabled:opacity-40"
+                >
+                  واگرد
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawPts([]);
+                    setDrawName("");
+                    setDrawMode(false);
+                  }}
+                  className="rounded-lg border border-line-strong bg-surface px-2 py-1 text-[11px] text-muted"
+                >
+                  لغو
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {addMode && addPin ? (
             <div className="absolute bottom-2 right-2 z-30 w-[268px] max-w-[86vw] rounded-xl border border-good/40 bg-surface p-2.5 text-[11px] shadow-xl">
@@ -3211,6 +3508,36 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
       {/* --------------------------------------------------------- sidebar -- */}
       <div className="flex min-w-0 flex-col gap-3">
+        <VisitPanel
+          items={data.prospects}
+          onFocus={(p) => flyLatLon(p.lat, p.lon, 15)}
+          onCycle={async (p) => {
+            await fetch("/api/prospects", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: p.id, status: nextStatus(p.status) }),
+            });
+            router.refresh();
+          }}
+          onRemove={async (p) => {
+            await fetch(`/api/prospects?id=${p.id}`, { method: "DELETE" });
+            router.refresh();
+          }}
+        />
+
+        <SurveyPanel
+          items={data.surveys}
+          onFocus={(a) => {
+            const lat = a.points.reduce((t, p) => t + p[0], 0) / a.points.length;
+            const lon = a.points.reduce((t, p) => t + p[1], 0) / a.points.length;
+            flyLatLon(lat, lon, 13);
+          }}
+          onRemove={async (a) => {
+            await fetch(`/api/surveys?id=${a.id}`, { method: "DELETE" });
+            router.refresh();
+          }}
+        />
+
         <ShortlistPanel
           items={data.shortlist}
           onRemove={async (id) => {

@@ -38,6 +38,12 @@ async function LiveMap() {
                 <span className="rounded-md border border-brand/20 bg-brand-soft px-2 py-1 text-[11px] font-medium text-brand-ink">
                   {group(t.counties)} شهرستان
                 </span>
+                <span
+                  className="rounded-md border border-line-strong bg-surface-2 px-2 py-1 text-[11px] text-muted"
+                  title="تا وقتی ورود کاربران اضافه نشود، همهٔ نشان‌ها و محدوده‌ها به این حساب می‌خورند"
+                >
+                  کاربر: {data.user.displayName} · {data.user.role === "owner" ? "مالک" : data.user.role}
+                </span>
                 <span className="rounded-md border border-accent/20 bg-accent-soft px-2 py-1 text-[11px] font-medium text-accent">
                   {group(t.cities)} شهر
                 </span>

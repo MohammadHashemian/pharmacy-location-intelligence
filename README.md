@@ -371,6 +371,28 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Two things that belong to a person: places to visit, and ground already walked
+
+**Visit list** — `prospect` table, `POST/PATCH/DELETE /api/prospects`. Mark a spot on the map,
+name it, add a note (rent, size, phone) and a travel priority. The list is ordered by
+priority; clicking the status chip walks it `برای بازدید → بازدید شد → رد شد`, which stamps
+`visited_at`. Flags are drawn on the map in a shape nothing else uses.
+
+**Surveyed areas** — `survey_area` table, `POST/DELETE /api/surveys`. Click corners to draw a
+polygon; it is stored with its size in km² and drawn as a hatched blue wash with its name, so
+the next trip shows at a glance which streets are already done. A wash alone reads as map
+shading — the diagonal hatch is what says «a person marked this».
+
+**Per user, without authentication yet.** Both tables carry `user_id`, every query filters by
+it, and `web/src/lib/user.ts` resolves the current user — today one seeded owner
+(«محمد هاشمیان»، role `owner`), shown as a chip in the header. Real accounts are a matter of
+replacing that one function: the schema, the API and the UI already scope by id. The test
+proves the scoping by inserting a second user's rows and asserting the owner cannot see them.
+
+Verified in `tools/test_annotations.py` (12 checks): mark → stored with `user_id` → flag drawn
+→ listed; status cycle → `visited_at` written; draw → 3 points, 6.58 km², polygon drawn;
+second user invisible; delete → gone.
+
 ### A manual pharmacy moves the analysis (`tools/test_live_analytics.py`)
 
 Reported: two pharmacies added in عین دو, and the «بیشترین شکاف» table did not move. Two

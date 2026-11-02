@@ -17,6 +17,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { all, one, run } from "./db";
+import { currentUser } from "./user";
 
 export type MapSettlement = {
   id: number;
@@ -224,12 +225,37 @@ export type ShortlistItem = {
   snapshotAt: string;
 };
 
+/** A place the user wants to stand in front of before signing a lease. */
+export type Prospect = {
+  id: number;
+  name: string;
+  lat: number;
+  lon: number;
+  note: string | null;
+  status: "todo" | "visited" | "rejected";
+  priority: number;
+  visitedAt: string | null;
+};
+
+/** A polygon the user has already walked — so the same streets are not surveyed twice. */
+export type SurveyArea = {
+  id: number;
+  name: string;
+  note: string | null;
+  points: [number, number][];
+  areaKm2: number | null;
+};
+
 export type MapData = {
   settlements: MapSettlement[];
   /** Ranked places to open a pharmacy (`etl/rank_sites.py`). Empty until it has run. */
   sites: SiteCandidate[];
   /** Places the user is actually comparing; metrics are the ones saved with the row. */
   shortlist: ShortlistItem[];
+  /** This user's visit list and the areas they have already surveyed. */
+  prospects: Prospect[];
+  surveys: SurveyArea[];
+  user: { id: number; displayName: string; role: string };
   /** [index a, index b] into `settlements`. */
   edges: [number, number][];
   cells: MapCell[];
@@ -603,6 +629,30 @@ export function loadMapData(): MapData {
     lon: Math.round(r.lon * 1e4) / 1e4,
   }));
 
+  const user = currentUser();
+  run(`CREATE TABLE IF NOT EXISTS prospect (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL,
+    lat REAL NOT NULL, lon REAL NOT NULL, note TEXT,
+    status TEXT NOT NULL DEFAULT 'todo', priority INTEGER NOT NULL DEFAULT 2,
+    visited_at TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  run(`CREATE TABLE IF NOT EXISTS survey_area (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL,
+    note TEXT, points TEXT NOT NULL, area_km2 REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+
+  const prospects: Prospect[] = all<{
+    id: number; name: string; lat: number; lon: number; note: string | null;
+    status: Prospect["status"]; priority: number; visitedAt: string | null;
+  }>(`SELECT id, name, lat, lon, note, status, priority, visited_at AS visitedAt
+        FROM prospect WHERE user_id = ? ORDER BY priority, id DESC`, [user.id])
+    .map((r) => ({ ...r, lat: Math.round(r.lat * 1e4) / 1e4, lon: Math.round(r.lon * 1e4) / 1e4 }));
+
+  const surveys: SurveyArea[] = all<{
+    id: number; name: string; note: string | null; points: string; areaKm2: number | null;
+  }>(`SELECT id, name, note, points, area_km2 AS areaKm2 FROM survey_area
+        WHERE user_id = ? ORDER BY id DESC`, [user.id])
+    .map((r) => ({ ...r, points: JSON.parse(r.points) as [number, number][] }));
+
   const imp = one<{
     built_at: string;
     reference_name: string;
@@ -694,6 +744,9 @@ export function loadMapData(): MapData {
     settlements,
     sites,
     shortlist,
+    prospects,
+    surveys,
+    user: { id: user.id, displayName: user.displayName, role: user.role },
     edges,
     cells,
     pharmacies,
