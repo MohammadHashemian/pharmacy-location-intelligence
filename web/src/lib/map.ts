@@ -126,6 +126,8 @@ export type MapPharmacy = {
 /** A place prescriptions are written: doctor, clinic, dentist, hospital, lab. */
 export type MapMedical = {
   id: number;
+  /** `manual` when a person pinned it; the id is then negative. */
+  source?: "manual";
   kind: "doctor" | "clinic" | "dentist" | "hospital" | "lab";
   name: string;
   lat: number;
@@ -269,8 +271,9 @@ function readShapes(file: string): MapShape[] {
 /** The table exists from the first hand-added pin; the loader may run before the
     API ever does, so it creates it here too rather than failing the whole page. */
 function ensureManualTable(): void {
-  run(`CREATE TABLE IF NOT EXISTS manual_pharmacy (
+  run(`CREATE TABLE IF NOT EXISTS manual_place (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind            TEXT NOT NULL DEFAULT 'pharmacy',
     name            TEXT NOT NULL,
     lat             REAL NOT NULL,
     lon             REAL NOT NULL,
@@ -282,6 +285,19 @@ function ensureManualTable(): void {
     county          TEXT,
     created_at      TEXT NOT NULL
   )`);
+  /* rows written before `kind` existed were all pharmacies */
+  const legacy = one<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'manual_pharmacy'",
+  );
+  if (legacy) {
+    run(`INSERT INTO manual_place
+           (id, kind, name, lat, lon, address, phone, note,
+            nearest_area_id, nearest_km, county, created_at)
+         SELECT id, 'pharmacy', name, lat, lon, address, phone, note,
+                nearest_area_id, nearest_km, county, created_at
+           FROM manual_pharmacy`);
+    run("DROP TABLE manual_pharmacy");
+  }
 }
 
 export function loadMapData(): MapData {
@@ -454,8 +470,9 @@ export function loadMapData(): MapData {
            NULL AS name_en, m.lat, m.lon, COALESCE(m.nearest_km, 0) AS nearest_km,
            a2.name AS settlement, m.county, m.nearest_area_id AS area_id,
            m.address, m.phone, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
-    FROM manual_pharmacy m
+    FROM manual_place m
     LEFT JOIN admin_area a2 ON a2.id = m.nearest_area_id
+    WHERE m.kind = 'pharmacy' 
     ORDER BY 1, 2
   `).map((p) => ({
     id: `${p.osm_type}/${p.osm_id}`,
@@ -500,9 +517,18 @@ export function loadMapData(): MapData {
            a.name AS settlement
     FROM map_medical m
     LEFT JOIN admin_area a ON a.id = m.nearest_area_id
-    ORDER BY m.kind, m.name
+    UNION ALL
+    /* Hand-added clinics, labs, dentists… Negative ids: map_medical owns the positive ones,
+       and the panel needs a stable key that cannot collide with an imported row. */
+    SELECT -m.id AS id, m.kind, m.name, m.lat, m.lon,
+           COALESCE(m.nearest_km, 0) AS nearest_km, m.address, m.county, a3.name AS settlement
+      FROM manual_place m
+      LEFT JOIN admin_area a3 ON a3.id = m.nearest_area_id
+     WHERE m.kind <> 'pharmacy'
+    ORDER BY 2, 3
   `).map((m) => ({
     id: m.id,
+    source: m.id < 0 ? ("manual" as const) : undefined,
     kind: m.kind,
     name: m.name,
     lat: Math.round(m.lat * 1e4) / 1e4,

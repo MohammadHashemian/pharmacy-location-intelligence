@@ -371,6 +371,36 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Hand-added places of any kind (`manual_place`)
+
+A pin a person adds is not always a pharmacy: it can be a درمانگاه, a مطب, a dentist, a
+hospital, a lab. `manual_place` carries a `kind`, and the map puts the row in the layer that
+kind belongs to — pharmacies as orange diamonds, the rest beside the 867 imported medical
+places.
+
+```
+POST  { kind, name, lat, lon, address?, phone?, note? }
+PATCH { id, kind?, name?, address?, phone?, note? }   ← changing kind moves the pin's layer
+```
+
+Six kinds: `pharmacy · clinic · doctor · dentist · hospital · lab`.
+
+Decisions worth keeping:
+
+* the 60 m duplicate rule is **per kind** — a clinic next door to a pharmacy is normal, a
+  second pharmacy on the same 60 m is a double entry;
+* manual medical rows are unioned into the medical layer with **negative ids**, so they can
+  never collide with an imported `map_medical` row, and the panel can still tell they are
+  hand-added (`source: "manual"`);
+* the old `manual_pharmacy` table is migrated in place, every existing row becoming
+  `kind = 'pharmacy'` — nobody has to re-pin their own work;
+* the success message after adding used to vanish in the same tick that cleared the form.
+  The pin and the form now stay; `لغو` closes them.
+
+Verified in a browser: adding a lab through the UI wrote `kind='lab'`; switching that row to
+`pharmacy` moved it into the pharmacy layer (+1 diamond, 434 → 435) and back out; the panel
+select reads `clinic` for a clinic and saves a change to `dentist` into the database.
+
 ### Hand-added pins: edit and delete (`PATCH /api/pharmacies`)
 
 A pin somebody added by standing in front of a shop can be wrong — a typo in the name, the

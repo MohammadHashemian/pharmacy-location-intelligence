@@ -691,6 +691,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const router = useRouter();
   const [addMode, setAddMode] = useState(false);
   const [addPin, setAddPin] = useState<{ lat: number; lon: number } | null>(null);
+  const [addKind, setAddKind] = useState<string>("pharmacy");
   const [addName, setAddName] = useState("");
   const [addAddr, setAddAddr] = useState("");
   const [addPhone, setAddPhone] = useState("");
@@ -2592,18 +2593,32 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           {addMode && addPin ? (
             <div className="absolute bottom-2 right-2 z-30 w-[268px] max-w-[86vw] rounded-xl border border-good/40 bg-surface p-2.5 text-[11px] shadow-xl">
               <div className="flex items-center justify-between gap-2">
-                <b className="text-[12px] text-ink">داروخانهٔ جدید</b>
+                <b className="text-[12px] text-ink">
+                  {addKind === "pharmacy" ? "داروخانهٔ جدید" : "مکان درمانی جدید"}
+                </b>
                 <span className="text-[9.5px] text-faint">
                   <bdi dir="ltr">
                     {addPin.lat.toFixed(5)}, {addPin.lon.toFixed(5)}
                   </bdi>
                 </span>
               </div>
+              <select
+                value={addKind}
+                onChange={(e) => setAddKind(e.target.value)}
+                className="mt-1.5 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11.5px] text-ink"
+              >
+                <option value="pharmacy">داروخانه</option>
+                <option value="clinic">درمانگاه / کلینیک</option>
+                <option value="doctor">مطب پزشک</option>
+                <option value="dentist">دندانپزشکی</option>
+                <option value="hospital">بیمارستان</option>
+                <option value="lab">آزمایشگاه</option>
+              </select>
               <input
                 autoFocus
                 value={addName}
                 onChange={(e) => setAddName(e.target.value)}
-                placeholder="نام داروخانه (الزامی)"
+                placeholder={addKind === "pharmacy" ? "نام داروخانه (الزامی)" : "نام مکان (الزامی)"}
                 className="mt-1.5 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11.5px] text-ink placeholder:text-faint"
               />
               <input
@@ -2631,6 +2646,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
+                          kind: addKind,
                           name: addName,
                           lat: addPin.lat,
                           lon: addPin.lon,
@@ -2643,16 +2659,18 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                         error?: string;
                         settlement?: string;
                         km?: number;
+                        kindFa?: string;
                       };
                       if (r.ok && j.ok) {
                         setAddMsg({
                           ok: true,
-                          text: `ثبت شد · ${j.settlement ?? ""} (${j.km ?? 0} کم)`,
+                          text: `${j.kindFa ?? ""} ثبت شد · ${j.settlement ?? ""} (${j.km ?? 0} کم)`,
                         });
                         setAddName("");
                         setAddAddr("");
                         setAddPhone("");
-                        setAddPin(null);
+                        /* keep the pin and the form: clearing them unmounted the success
+                           message in the same tick, so the user saw nothing happen */
                         router.refresh();
                       } else {
                         setAddMsg({ ok: false, text: j.error ?? "ثبت نشد" });

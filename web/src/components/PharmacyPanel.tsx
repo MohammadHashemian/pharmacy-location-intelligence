@@ -67,9 +67,19 @@ export function PlacePanel({
   /* Only a hand-added pin is editable: OSM and Google rows are rewritten by the next ETL
      run, so an edit there would disappear without saying so. */
   const manualId =
-    pharm?.source === "manual" ? Number(pharm.id.split("/")[1]) : null;
+    pharm?.source === "manual"
+      ? Number(pharm.id.split("/")[1])
+      : medical?.source === "manual"
+        ? -medical.id
+        : null;
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ name: "", address: "", phone: "", note: "" });
+  const [draft, setDraft] = useState({
+    kind: "pharmacy",
+    name: "",
+    address: "",
+    phone: "",
+    note: "",
+  });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   if (!pharm && !medical) return null;
@@ -121,8 +131,9 @@ export function PlacePanel({
                 type="button"
                 onClick={() => {
                   setDraft({
+                    kind: pharm ? "pharmacy" : (medical?.kind ?? "clinic"),
                     name: anchor.name,
-                    address: pharm?.profile?.address ?? "",
+                    address: pharm?.profile?.address ?? (medical?.address ?? ""),
                     phone: pharm?.profile?.phone ?? "",
                     note: "",
                   });
@@ -166,10 +177,25 @@ export function PlacePanel({
 
       {manualId && editing ? (
         <div className="mb-2 rounded-lg border border-line bg-surface-2 p-2">
+          <label className="mb-1.5 block">
+            <span className="text-[10px] text-faint">نوع خدمت</span>
+            <select
+              value={draft.kind}
+              onChange={(e) => setDraft((d) => ({ ...d, kind: e.target.value }))}
+              className="mt-0.5 w-full rounded-md border border-line-strong bg-surface px-2 py-1 text-[11px] text-ink"
+            >
+              <option value="pharmacy">داروخانه</option>
+              <option value="clinic">درمانگاه / کلینیک</option>
+              <option value="doctor">مطب پزشک</option>
+              <option value="dentist">دندانپزشکی</option>
+              <option value="hospital">بیمارستان</option>
+              <option value="lab">آزمایشگاه</option>
+            </select>
+          </label>
           <div className="grid gap-1.5">
             {(
               [
-                ["name", "نام داروخانه", "text"],
+                ["name", draft.kind === "pharmacy" ? "نام داروخانه" : "نام مکان", "text"],
                 ["address", "نشانی", "text"],
                 ["phone", "تلفن", "tel"],
                 ["note", "یادداشت", "text"],
@@ -215,7 +241,9 @@ export function PlacePanel({
             >
               ذخیره
             </button>
-            <span className="text-[10px] text-faint">فقط همین نقطه ویرایش می‌شود</span>
+            <span className="text-[10px] text-faint">
+              با تغییر نوع، نقطه به لایهٔ همان خدمت می‌رود
+            </span>
           </div>
         </div>
       ) : null}
