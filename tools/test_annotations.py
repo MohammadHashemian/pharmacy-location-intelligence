@@ -105,8 +105,14 @@ def main() -> int:
               bool(surveys) and len(surveys[0]["points"]) >= 3 and (surveys[0]["areaKm2"] or 0) > 0,
               f"{len(surveys[0]['points']) if surveys else 0} points · "
               f"{surveys[0]['areaKm2'] if surveys else 0} km²")
-        check("polygon drawn on the map",
-              pg.locator('g[data-layer="surveys"] g[data-survey]').count() == 1)
+        # the reload after a save is a server round trip: poll instead of trusting one frame
+        drawn = 0
+        for _ in range(20):
+            drawn = pg.locator('g[data-layer="surveys"] g[data-survey]').count()
+            if drawn >= 1:
+                break
+            pg.wait_for_timeout(500)
+        check("polygon drawn on the map", drawn == 1, f"{drawn} polygons")
 
         # ---- 5. per-user scoping
         c = sqlite3.connect(DB)
@@ -131,6 +137,7 @@ def main() -> int:
         c = sqlite3.connect(DB)
         c.execute("DELETE FROM prospect WHERE user_id = ?", (uid2,))
         c.execute("DELETE FROM survey_area WHERE user_id = ?", (uid2,))
+        c.execute("DELETE FROM app_user WHERE id = ?", (uid2,))
         c.commit()
         c.close()
 
@@ -138,11 +145,20 @@ def main() -> int:
         pg.reload(wait_until="domcontentloaded")
         pg.wait_for_selector('g#scene[data-ready="1"]', timeout=60000)
         pg.wait_for_timeout(2500)
-        for _ in range(2):
-            btn = pg.locator('button[title="حذف"]').first
-            if btn.count():
-                btn.click()
-                pg.wait_for_timeout(1600)
+        for pid in [i["id"] for i in api("/api/prospects")["items"]]:
+            b = pg.locator(f'button[data-del="prospect-{pid}"]')
+            if b.count():
+                b.click()
+                pg.wait_for_timeout(1500)
+        for sid in [i["id"] for i in api("/api/surveys")["items"]]:
+            b = pg.locator(f'button[data-del="survey-{sid}"]')
+            if b.count():
+                b.click()
+                pg.wait_for_timeout(1500)
+        for _ in range(10):
+            if not api("/api/prospects")["items"] and not api("/api/surveys")["items"]:
+                break
+            pg.wait_for_timeout(600)
         check("both deleted", not api("/api/prospects")["items"] and not api("/api/surveys")["items"],
               "lists empty")
         br.close()

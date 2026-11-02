@@ -77,6 +77,7 @@ export function VisitPanel({
                 </button>
                 <button
                   type="button"
+                  data-del={`prospect-${p.id}`}
                   onClick={() => onRemove(p)}
                   className="shrink-0 rounded border border-line-strong px-1 text-[9px] text-danger"
                   title="حذف"
@@ -132,6 +133,7 @@ export function SurveyPanel({
               </span>
               <button
                 type="button"
+                data-del={`survey-${a.id}`}
                 onClick={() => onRemove(a)}
                 className="shrink-0 rounded border border-line-strong px-1 text-[9px] text-danger"
                 title="حذف"
