@@ -69,6 +69,45 @@ export async function GET() {
   return NextResponse.json({ pharmacies: rows });
 }
 
+/* Editing a hand-added pin. Only manual rows can arrive here: everything else is rebuilt
+   from Google/OSM on the next ETL run, so an edit would vanish without a trace. */
+export async function PATCH(req: Request) {
+  ensureTable();
+  let body: Record<string, unknown>;
+  try {
+    body = (await req.json()) as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+
+  const id = Number(body.id);
+  if (!Number.isInteger(id)) {
+    return NextResponse.json({ error: "شناسه نامعتبر است" }, { status: 400 });
+  }
+  const existing = one<{ id: number }>("SELECT id FROM manual_pharmacy WHERE id = ?", [id]);
+  if (!existing) {
+    return NextResponse.json({ error: "این داروخانه پیدا نشد" }, { status: 404 });
+  }
+
+  const name = String(body.name ?? "").replace(/\s+/g, " ").trim();
+  const address = String(body.address ?? "").trim() || null;
+  const phone = String(body.phone ?? "").trim() || null;
+  const note = String(body.note ?? "").trim() || null;
+
+  if (name.length < 3 || name.length > 120) {
+    return NextResponse.json({ error: "نام باید بین ۳ تا ۱۲۰ نویسه باشد" }, { status: 400 });
+  }
+  if (phone && !/^[0-9+\-\s]{6,20}$/.test(phone)) {
+    return NextResponse.json({ error: "شمارهٔ تلفن نامعتبر است" }, { status: 400 });
+  }
+
+  run("UPDATE manual_pharmacy SET name = ?, address = ?, phone = ?, note = ? WHERE id = ?",
+      [name, address, phone, note, id]);
+  const row = one<{ name: string; address: string | null; phone: string | null; note: string | null }>(
+    "SELECT name, address, phone, note FROM manual_pharmacy WHERE id = ?", [id]);
+  return NextResponse.json({ ok: true, id, pharmacy: row });
+}
+
 export async function DELETE(req: Request) {
   ensureTable();
   const id = Number(new URL(req.url).searchParams.get("id"));

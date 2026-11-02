@@ -371,6 +371,28 @@ curl -X POST localhost:3737/api/pharmacies -H 'Content-Type: application/json'  
 curl -X DELETE 'localhost:3737/api/pharmacies?id=3'
 ```
 
+### Hand-added pins: edit and delete (`PATCH /api/pharmacies`)
+
+A pin somebody added by standing in front of a shop can be wrong — a typo in the name, the
+pharmacy next door, the one that closed. Clicking it now opens the panel with **ویرایش** and
+**حذف**, and only for `source = 'manual'` rows:
+
+```
+PATCH /api/pharmacies  { id, name, address, phone, note }   → updates that row
+DELETE /api/pharmacies?id=<id>                              → removes it
+```
+
+Imported rows get no buttons on purpose: `map_pharmacy` is rebuilt from Google/OSM on every
+ETL run, so an edit to one of those would disappear without saying so. Coordinates are not
+editable from the panel either — a pin at the wrong place should be deleted and re-added,
+which keeps `nearest_area_id`, `county` and the density ring honest instead of silently
+skewing them.
+
+Verified in a browser: draft prefilled from the row, save persists (`داروخانه آزمون ویرایش`
+→ `داروخانه آزمون — نام اصلاحشده`, phone `0611111111` → `0612222222`), reload shows the new
+name, delete removes the row and closes the panel, and a Google row (`poi/1910340621`)
+offers neither button.
+
 ### Satellite tiles are local (`/api/tile/[z]/[x]/[y]` + `etl/prefetch_sat.py`)
 
 The imagery used to be fetched straight from ArcGIS by the browser, so every pan and every

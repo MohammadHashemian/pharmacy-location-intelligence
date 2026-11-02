@@ -2907,6 +2907,7 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           medical={selMed !== null ? data.medical[selMed] : null}
           pharmacies={data.pharmacies}
           medicals={data.medical}
+          onChanged={() => router.refresh()}
           onClose={() => {
             setSelPharm(null);
             setSelMed(null);
