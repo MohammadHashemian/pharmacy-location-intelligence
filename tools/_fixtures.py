@@ -32,6 +32,15 @@ def snapshot(keep: int = 12) -> str | None:
     """
     if not os.path.exists(DB):
         return None
+    # fold the write-ahead log into the main file first, otherwise the copy can miss the last
+    # few commits and a «snapshot» would silently be older than the damage it is meant to undo
+    import sqlite3
+    try:
+        con = sqlite3.connect(DB)
+        con.execute("PRAGMA wal_checkpoint(FULL)")
+        con.close()
+    except Exception:
+        pass
     os.makedirs(SNAPS, exist_ok=True)
     dst = os.path.join(SNAPS, time.strftime("%Y%m%d-%H%M%S.sqlite"))
     shutil.copy2(DB, dst)
