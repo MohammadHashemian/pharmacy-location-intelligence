@@ -6,19 +6,21 @@ Two suites, deliberately split by what they can prove.
 |---|---|---|---|
 | unit | `cd web && npm run test:coverage` | `src/lib/**`, `src/app/api/**` | ~6 s |
 | end-to-end | `python tools/test_*.py` | the pages a person actually uses | ~30-90 s each |
+| browser proofs | `node web/scripts/proof-*.mjs` | the client-only surfaces (table, map) | ~20 s each |
 
 ## Unit suite (vitest)
 
 ```
 cd web
-npm run test            # 103 tests
+npm run test            # 127 tests
 npm run test:coverage   # + coverage report, fails under the thresholds
 ```
 
-Coverage (v8, measured on 2026-11-03):
+Coverage (v8, measured on 2026-11-03 over the working tree, which also carries the
+in-progress settings/LLM routes):
 
 ```
-Statements  83.1%   Branches 65.6%   Functions 87.0%   Lines 84.4%
+Statements  81.3%   Branches 65.9%   Functions 84.0%   Lines 82.6%
 ```
 
 Thresholds in `vitest.config.ts`: 70 % lines / statements / functions, 60 % branches.
@@ -44,6 +46,7 @@ Files:
 | `loaders.test.ts` | the three page loaders against the real schema |
 | `api.test.ts` | every route, including the refusal paths (400s) |
 | `routes-misc.test.ts` | photo proxy validation, tile zoom bounds, key-check refusals |
+| `tableFilter.test.ts` | column filters: Persian/Latin digits, one-ended and crossed ranges, unknown values never pass a range, substring and pick lists |
 
 ## End-to-end suite (Playwright, python)
 
@@ -61,6 +64,23 @@ python tools/test_visit_order.py       # unlimited list, drag to reorder, no pri
 python tools/test_per_user_visits.py   # two users, two lists, one table
 python tools/test_fixture_isolation.py # cleanup cannot reach the owner's data
 ```
+
+### Node proof scripts (`web/scripts/`)
+
+The browser-only surfaces have their own harnesses next to the code they drive — same CDP
+approach, no npm dependency, one command each:
+
+```bash
+cd web
+node scripts/proof-table-filter.mjs    # header filter panels: range, text, chip, sort arrow
+node scripts/proof-unwrap.mjs          # the «بازکردن همهٔ شهرهای هم‌شهرستان» toggle
+node scripts/proof-map.mjs             # the map: markers, labels, zoom, panel
+```
+
+`proof-table-filter.mjs` reads the rendered cells back and asserts every visible value obeys
+the range it typed, because «the row count changed» is also what a broken renderer produces.
+It waits for two identical row counts before taking the baseline: a read at a fixed 8 s once
+caught a half-painted board (648 of 1,627 rows) and looked like a filter effect.
 
 ### The rule that costs the most to break
 

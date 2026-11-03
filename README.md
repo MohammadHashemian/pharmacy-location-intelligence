@@ -317,6 +317,28 @@ feeds it in two controlled ways, and neither invents a pharmacy number:
 python etl/link_admin_places.py --min-village 3000   # idempotent
 ```
 
+### Filtering a column, not just sorting it (`lib/tableFilter.ts`)
+
+Clicking a header opens a panel for **that** column; sorting stays one click away on
+the arrow, so the two no longer compete for the same gesture.
+
+* numeric columns get `از` / `تا` — either end may be empty, so «بین ۲۰ و ۸۰ هزار
+  نفر» and «≥ ۵۰ هزار» are both expressible. Empty boxes show the data's own min/max,
+  Persian digits and `٬` grouping parse the same as Latin, and a crossed pair
+  (`از ۵۰٬۰۰۰ تا ۱۰٬۰۰۰`) is read as the same interval instead of emptying the table.
+* text columns get `شامل` (substring) plus a pick list with counts when the column
+  has ≤ 40 distinct values (province, county) — a 1,600-name list would be noise.
+* a row whose value is unknown renders `—` and **never** passes a numeric range: the
+  cell has no number, so keeping it inside «۱۰–۵۰ هزار» would be a lie.
+* active filters appear as chips above the table (`جمعیت ۲۰٬۰۰۰ تا ۸۰٬۰۰۰ ×`), the
+  counter reads `۲۲۳ از ۱٬۶۲۷ آبادی`, and the CSV export follows the filtered rows.
+  Filtering narrows the visible list only — scores and ranks still describe the whole
+  compared set.
+
+```bash
+cd web && node scripts/proof-table-filter.mjs   # 1,627 -> 223 rows, every cell in range
+```
+
 ### Density: where the count actually goes
 
 The FDA feed counts pharmacies per *settlement*, not per address, so the raw

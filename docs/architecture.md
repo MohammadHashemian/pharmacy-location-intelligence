@@ -66,6 +66,11 @@ src/components/*.tsx       client components; receive plain JSON only
   to replace that function.
 * **Big computed surfaces are fetched per viewport** (`/api/density?bbox=…`) rather than shipped
   with the page: 80,000 cells would triple the payload to draw a corner of it.
+* **Table filters are client state over the rows already shipped** (`lib/tableFilter.ts` +
+  `PlacesTable`). Clicking a header opens a panel with an `از/تا` range (numeric columns) or a
+  substring + value pick list (text columns); it narrows the visible list only, so the score and
+  the «رتبه» column still describe the whole compared set. There is no round trip and no SQL —
+  the filter predicate is unit-tested, the panel is proved in `web/scripts/proof-table-filter.mjs`.
 
 ## Numbers that must stay true
 
@@ -73,6 +78,7 @@ src/components/*.tsx       client components; receive plain JSON only
 |---|---|
 | 5,505 settlements · 3,677 plotted · 1,828 without a coordinate | `map_meta`, header chips |
 | supply = `max(FDA register, mapped pins)` | `v_map_pharmacy_mapped`, `settlement_service.supply` |
+| a column filter narrows the rows, never the score | `lib/tableFilter.ts`, `web/scripts/proof-table-filter.mjs` |
 | the saturated core of اهواز is never an «opportunity» | `tools/test_opportunity.py` |
 | full screen does not change type size | `unitsPerPx` in `KhuzestanMap`, `tools/test_font_sizes.py` |
 | a test never deletes a row it did not create | `tools/_fixtures.py` |
