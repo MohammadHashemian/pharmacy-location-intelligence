@@ -468,6 +468,20 @@ would compete with it, and carries its own legend.
 `tools/test_opportunity.py`: the surface exists, the core of اهواز (3 km) has **zero** bright
 cells, the hottest cells are populated and rural, small gaps are not drawn, the legend renders.
 
+### The visit list is per user — here is the proof
+
+`prospect` carries `user_id`, `/api/prospects` resolves it from `currentUser()`, and the panel
+only ever receives that user's rows; nothing about the list lives in the browser. The identity
+is still hard-coded to the seeded owner because there is no authentication yet, but every query
+is already scoped, so adding accounts is a change to `currentUser()` alone.
+
+`tools/test_per_user_visits.py` writes a second account's row straight into the table and checks
+that the API and the panel never see it, that the owner's own row survives a reload, and that
+both lists coexist in one table (`user1=1 · user2=1`).
+
+Tests that touch user data now copy the database first: `tools/_fixtures.snapshot()` keeps the
+last twelve copies in `db/snapshots/`, so a bad cleanup is recoverable instead of permanent.
+
 ### Annotations were never lost to a refresh — a test deleted them
 
 The areas were always in SQLite (`survey_area`, keyed by `user_id`) and always reloaded from

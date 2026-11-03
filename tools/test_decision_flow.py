@@ -23,7 +23,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../src")
 from fetch_zarfiat import find_local_chromium  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
-from _fixtures import PREFIX, sweep  # noqa: E402
+from _fixtures import PREFIX, snapshot, sweep  # noqa: E402
 
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(HOME, "db", "pharmacy.sqlite")
@@ -51,6 +51,7 @@ def hav(a, b, c, d):
 
 
 def main() -> int:
+    snapshot()          # the owner's rows must survive a failed run
     baseline = {it["id"] for it in api("/api/shortlist")["items"]}
 
     c = sqlite3.connect(DB)

@@ -13,7 +13,32 @@ Every fixture this repository creates now starts with `PREFIX`, and cleanup goes
 """
 from __future__ import annotations
 
+import os
+import shutil
+import time
+
 PREFIX = "آزمون"
+
+HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB = os.path.join(HOME, "db", "pharmacy.sqlite")
+SNAPS = os.path.join(HOME, "db", "snapshots")
+
+
+def snapshot(keep: int = 12) -> str | None:
+    """Copy the database before a test touches user data.
+
+    The owner's annotations are not fixtures; if a test goes wrong the rows still exist in the
+    last snapshot. Cheap (80 MB), and only twelve are kept.
+    """
+    if not os.path.exists(DB):
+        return None
+    os.makedirs(SNAPS, exist_ok=True)
+    dst = os.path.join(SNAPS, time.strftime("%Y%m%d-%H%M%S.sqlite"))
+    shutil.copy2(DB, dst)
+    old = sorted(f for f in os.listdir(SNAPS) if f.endswith(".sqlite"))[:-keep]
+    for f in old:
+        os.remove(os.path.join(SNAPS, f))
+    return dst
 
 
 def is_fixture(name: str | None) -> bool:

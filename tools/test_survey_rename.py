@@ -17,7 +17,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../src")
 from fetch_zarfiat import find_local_chromium  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
-from _fixtures import PREFIX, sweep  # noqa: E402
+from _fixtures import PREFIX, snapshot, sweep  # noqa: E402
 
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(HOME, "db", "pharmacy.sqlite")
@@ -35,6 +35,7 @@ def api(path: str, body: dict | None = None, method: str | None = None) -> dict:
 
 
 def main() -> int:
+    snapshot()          # the owner's rows must survive a failed run
     sweep(api, "/api/surveys")
 
     poly = [[31.30, 48.66], [31.31, 48.66], [31.31, 48.67], [31.30, 48.67]]
