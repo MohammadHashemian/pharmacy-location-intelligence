@@ -55,6 +55,10 @@ src/app/api/**/route.ts    the write paths and the viewport endpoints
 src/components/*.tsx       client components; receive plain JSON only
 ```
 
+* **Settings** — `lib/settings.ts` (map keys) and `lib/llm.ts` (provider → base URL → model →
+  key) are the only readers of `app_setting`. Both return a masked status to the browser, and
+  `classify_with_llm.py` resolves the same `llm_*` rows, with the legacy `openrouter_*` pair as
+  a fallback.
 * **Loaders** (`loadDashboardData`, `loadMapData`, `loadAdminData`) run SQL and return plain
   objects. `node:sqlite` returns null-prototype rows, so `lib/db.ts` re-homes every row onto
   `Object.prototype` before it crosses the server → client boundary.

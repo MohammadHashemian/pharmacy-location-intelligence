@@ -1150,8 +1150,17 @@ for a local tool, not fine if this is ever deployed publicly.
 
 The rules settle what the name says. They cannot settle `Dr. Sadeghi`, `بگا`,
 `مرکز مشاوره پیوند مهر` or `خوزستان دزفول صفی آباد` — 114 rows today. Those go to a
-model over **OpenRouter**, with the key and the model name stored in `app_setting`
-from `/settings` (key masked to its last four characters, model shown as typed).
+model on whichever **OpenAI-compatible gateway** `/settings` is pointed at.
+
+The settings page asks four things in order — **provider → base URL → model → key** —
+and ships presets for OpenRouter, OpenAI and 9Router plus an editable «سفارشی» entry,
+so any `/v1/chat/completions` endpoint works (LiteLLM, Ollama, vLLM, a company proxy).
+The model field is free text with a catalogue dropdown fed by the gateway's own
+`GET /models`, so a typo is caught by choosing an id rather than by a failed run.
+Values live in `app_setting` (`llm_provider`, `llm_base_url`, `llm_model`,
+`llm_api_key`); the key is masked to its last four characters everywhere in the UI,
+and the old `openrouter_api_key` / `openrouter_model` pair is still honoured when no
+provider has been chosen, so an existing install keeps working.
 
 ```bash
 python etl/classify_with_llm.py                 # count + sample, no key needed
@@ -1167,9 +1176,11 @@ model, prompt_v)`, keyed by model, so a re-run costs nothing. `--apply` touches 
 `confidence >= 0.85`: a pharmacy judged to be a doctor's office moves to the medical
 layer, `irrelevant` is deleted, everything else waits.
 
-`/api/settings/test` verifies both halves without a key: the model id is checked
-against the live OpenRouter catalogue, and the key is checked with `GET /api/v1/key`
-(a wrong key comes back 401 with OpenRouter's own reason).
+`GET /api/settings/llm/models` lists the saved gateway's catalogue, and
+`POST /api/settings/llm/test` makes one 8-token chat call — so a wrong key or a model
+id the gateway does not route fails on the settings page instead of halfway through a
+run. Neither answer contains the key. The two map keys keep their own
+`/api/settings/test` probe (a real «داروخانه» search around اهواز).
 
 ### What counts as a pharmacy or a clinic (`etl/classify_poi.py`)
 

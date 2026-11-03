@@ -23,20 +23,6 @@ export const PROVIDERS = [
     docs: "https://console.cloud.google.com/google/maps-apis",
     secret: true,
   },
-  {
-    key: "openrouter_api_key",
-    label: "OpenRouter (کلید)",
-    hint: "کلید از openrouter.ai/keys. برای نام‌هایی که قاعده‌ها نمی‌توانند تعیین کنند (داروخانه یا مطب یا نامرتبط) استفاده می‌شود؛ فقط سرور آن را می‌خواند و در مرورگر پوشانده می‌شود.",
-    docs: "https://openrouter.ai/keys",
-    secret: true,
-  },
-  {
-    key: "openrouter_model",
-    label: "OpenRouter (نام مدل)",
-    hint: "شناسهٔ مدل، مثل google/gemini-2.5-flash یا openai/gpt-4o-mini. کار این مدل فقط برچسب‌زدن است، پس ارزان‌ترین مدل کافی است.",
-    docs: "https://openrouter.ai/models",
-    secret: false,
-  },
 ] as const;
 
 export type ProviderKey = (typeof PROVIDERS)[number]["key"];
@@ -54,7 +40,7 @@ export type SettingStatus = {
   updatedAt: string | null;
 };
 
-function ensureTable(): void {
+export function ensureTable(): void {
   run(`CREATE TABLE IF NOT EXISTS app_setting (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,

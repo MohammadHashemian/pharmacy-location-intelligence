@@ -5,8 +5,10 @@ tail: «Dr. Sadeghi» (a pharmacy or a doctor's office?), «مرکز مشاور�
 (counselling — a medical service?), «بگا» (nothing at all). Those are semantics, not
 tokens.
 
-The key and the model name come from `/settings` (table `app_setting`), so nothing is
-stored in this file or in the repo.
+Provider, base URL, model and key come from `/settings` (table `app_setting`, keys
+`llm_provider` / `llm_base_url` / `llm_model` / `llm_api_key`), so nothing is stored in
+this file or in the repo. An install that still has only the old `openrouter_api_key` /
+`openrouter_model` rows keeps working.
 
     python etl/classify_with_llm.py                  # report what would be judged
     python etl/classify_with_llm.py --run            # call OpenRouter, store verdicts
@@ -36,7 +38,12 @@ from classify_poi import (  # noqa: E402
 
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.path.join(HOME, "db", "pharmacy.sqlite")
-API = "https://openrouter.ai/api/v1/chat/completions"
+# Defaults for the presets the settings page offers; `llm_base_url` always wins.
+BASE_URLS = {
+    "openrouter": "https://openrouter.ai/api/v1",
+    "openai": "https://api.openai.com/v1",
+    "9router": "https://9router.com/v1",
+}
 ROLES = [PHARMACY, DOCTOR, CLINIC, DENTIST, HOSPITAL, LAB, IRRELEVANT, UNKNOWN]
 FLOOR = 0.85
 # A row already sitting in the pharmacy table is weak evidence for «pharmacy»; a row in the
@@ -71,6 +78,16 @@ Output JSON only, no prose, no code fences."""
 def setting(c: sqlite3.Connection, key: str) -> str | None:
     row = c.execute("SELECT value FROM app_setting WHERE key = ?", (key,)).fetchone()
     return row[0] if row else None
+
+
+def llm_conf(c: sqlite3.Connection) -> tuple[str, str | None, str | None]:
+    """(base_url, key, model) from the settings panel, legacy OpenRouter rows last."""
+    provider = setting(c, "llm_provider")
+    if provider:
+        base = setting(c, "llm_base_url") or BASE_URLS.get(provider, "")
+        return base.rstrip("/"), setting(c, "llm_api_key"), setting(c, "llm_model")
+    return (BASE_URLS["openrouter"], setting(c, "openrouter_api_key"),
+            setting(c, "openrouter_model"))
 
 
 def ensure_table(c: sqlite3.Connection) -> None:
@@ -130,7 +147,7 @@ def parse(raw: str) -> list[dict]:
     return out
 
 
-def ask(key: str, model: str, items: list[dict], timeout: int = 120) -> str:
+def ask(base: str, key: str, model: str, items: list[dict], timeout: int = 120) -> str:
     body = json.dumps({
         "model": model,
         "temperature": 0,
@@ -142,12 +159,11 @@ def ask(key: str, model: str, items: list[dict], timeout: int = 120) -> str:
                  for i, it in enumerate(items)], ensure_ascii=False)},
         ],
     }).encode()
-    req = urllib.request.Request(API, data=body, headers={
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/MohammadHashemian/pharmacy-location-intelligence",
-        "X-Title": "pharmacy-location-intelligence",
-    })
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    if "openrouter.ai" in base:      # OpenRouter attributes spend by these; other gateways reject them
+        headers["HTTP-Referer"] = "https://github.com/MohammadHashemian/pharmacy-location-intelligence"
+        headers["X-Title"] = "pharmacy-location-intelligence"
+    req = urllib.request.Request(f"{base}/chat/completions", data=body, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         data = json.loads(r.read())
     return data["choices"][0]["message"]["content"]
@@ -224,7 +240,7 @@ def check() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run", action="store_true", help="call OpenRouter")
+    ap.add_argument("--run", action="store_true", help="call the configured gateway")
     ap.add_argument("--apply", action="store_true", help="move/delete after judging")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--batch", type=int, default=25)
@@ -239,20 +255,20 @@ def main() -> int:
     c = sqlite3.connect(DB)
     c.row_factory = sqlite3.Row
     ensure_table(c)
-    key = setting(c, "openrouter_api_key")
-    model = setting(c, "openrouter_model")
+    base, key, model = llm_conf(c)
 
     if not args.run:
         todo = candidates(c, model or "—")
         print(f"{len(todo)} places need a verdict")
         for r in todo[:12]:
             print(f"  [{r['src'][4:]}] {r['name'][:44]:46s} {r['addr'][:40]}")
-        print(f"\nkey: {'saved' if key else 'MISSING'} · model: {model or 'MISSING'}")
-        print("add both in /settings, then: python etl/classify_with_llm.py --run --apply")
+        print(f"\nprovider: {base or 'MISSING'} · key: {'saved' if key else 'MISSING'}"
+              f" · model: {model or 'MISSING'}")
+        print("set them in /settings, then: python etl/classify_with_llm.py --run --apply")
         return 0
 
     if not key or not model:
-        print("missing openrouter_api_key / openrouter_model in app_setting — set them in /settings")
+        print("missing provider/key/model in app_setting — set them in /settings")
         return 1
 
     todo = candidates(c, model, audit=args.audit)
@@ -267,7 +283,7 @@ def main() -> int:
     for start in range(0, len(todo), args.batch):
         batch = todo[start:start + args.batch]
         try:
-            raw = ask(key, model, batch)
+            raw = ask(base, key, model, batch)
             rows = parse(raw)
         except (urllib.error.HTTPError, ValueError, KeyError, TimeoutError) as e:
             print(f"  batch {start//args.batch + 1}: {str(e)[:120]}")

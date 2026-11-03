@@ -1,7 +1,10 @@
 /**
- * Live key check: calls the provider from the SERVER with the stored key and
+ * Live map-key check: calls the provider from the SERVER with the stored key and
  * reports what came back. This is the difference between "a string is saved" and
  * "the key works" — and it never exposes the key to the browser.
+ *
+ * The language model is checked by `/api/settings/llm/test`, because its provider,
+ * base URL and model are user-chosen.
  *
  *   POST { key: "neshan_api_key" | "google_places_key" }
  */
@@ -28,67 +31,6 @@ export async function POST(req: Request) {
 
   const timeout = AbortSignal.timeout(20_000);
   try {
-    if (key === "openrouter_api_key" || key === "openrouter_model") {
-      /* OpenRouter: cheap and public to verify — one call proves the key, one proves
-         the model id exists. The model list needs no key, so a model typo is caught
-         even before a key is saved. */
-      const apiKey = getKey("openrouter_api_key");
-      const model = getKey("openrouter_model");
-      const modelsRes = await fetch("https://openrouter.ai/api/v1/models", { signal: timeout });
-      const modelsJson = modelsRes.ok
-        ? ((await modelsRes.json()) as { data?: { id: string; pricing?: { prompt?: string } }[] })
-        : { data: [] };
-      const ids = new Set((modelsJson.data ?? []).map((m) => m.id));
-      if (key === "openrouter_model" && !ids.has(value)) {
-        return NextResponse.json({
-          ok: false,
-          error: "این شناسهٔ مدل در OpenRouter نیست",
-          detail: `«${value}» — فهرست https://openrouter.ai/models`,
-        });
-      }
-      if (!apiKey) {
-        return NextResponse.json({
-          ok: false,
-          error: "ابتدا کلید OpenRouter را ذخیره کنید",
-        });
-      }
-      const r = await fetch("https://openrouter.ai/api/v1/key", {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: timeout,
-      });
-      const text = await r.text();
-      if (!r.ok) {
-        return NextResponse.json({
-          ok: false,
-          status: r.status,
-          error:
-            r.status === 401
-              ? "کلید OpenRouter پذیرفته نشد (۴۰۱)"
-              : `OpenRouter پاسخ ${r.status} داد`,
-          detail: text.slice(0, 300),
-        });
-      }
-      const info = JSON.parse(text) as {
-        data?: { label?: string; usage?: number; limit?: number | null; is_free_tier?: boolean };
-      };
-      const used = info.data?.usage ?? 0;
-      const limit = info.data?.limit ?? null;
-      return NextResponse.json({
-        ok: true,
-        provider: "OpenRouter",
-        found: 0,
-        message: [
-          "کلید معتبر است",
-          info.data?.label ? `«${info.data.label}»` : "",
-          limit ? `مصرف ${used.toFixed(3)} از ${limit}` : `مصرف ${used.toFixed(3)} دلار`,
-          info.data?.is_free_tier ? "سطح رایگان" : "",
-          model ? (ids.has(model) ? `مدل ${model} موجود است` : `مدل ${model} پیدا نشد`) : "مدل تنظیم نشده",
-        ]
-          .filter(Boolean)
-          .join(" · "),
-      });
-    }
-
     if (key === "neshan_api_key") {
       // A Neshan key is bound to the service picked when it was created, so probe
       // both point services: nearby (location+radius) first, then search

@@ -47,6 +47,7 @@ Files:
 | `api.test.ts` | every route, including the refusal paths (400s) |
 | `routes-misc.test.ts` | photo proxy validation, tile zoom bounds, key-check refusals |
 | `tableFilter.test.ts` | column filters: Persian/Latin digits, one-ended and crossed ranges, unknown values never pass a range, substring and pick lists |
+| `llm.test.ts` | provider presets, base-URL normalisation (a pasted `/chat/completions` is accepted), model/key validation, save → mask → clear round trip, legacy `openrouter_*` fallback, and the two LLM routes' 400s |
 
 ## End-to-end suite (Playwright, python)
 
@@ -75,6 +76,7 @@ cd web
 node scripts/proof-table-filter.mjs    # header filter panels: range, text, chip, sort arrow
 node scripts/proof-unwrap.mjs          # the «بازکردن همهٔ شهرهای هم‌شهرستان» toggle
 node scripts/proof-map.mjs             # the map: markers, labels, zoom, panel
+node scripts/proof-llm-settings.mjs    # /settings LLM panel: presets, model catalogue, masked key, 1440/390 px
 ```
 
 `proof-table-filter.mjs` reads the rendered cells back and asserts every visible value obeys

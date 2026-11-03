@@ -1,7 +1,9 @@
 import { Suspense } from "react";
 import { connection } from "next/server";
 import Link from "next/link";
+import { LlmSettings } from "@/components/LlmSettings";
 import { SettingsForm } from "@/components/SettingsForm";
+import { llmStatus } from "@/lib/llm";
 import { listStatus } from "@/lib/settings";
 
 /**
@@ -13,6 +15,7 @@ import { listStatus } from "@/lib/settings";
 async function LiveSettings() {
   await connection();
   const providers = listStatus();
+  const llm = llmStatus();
 
   return (
     <>
@@ -24,11 +27,12 @@ async function LiveSettings() {
                 تنظیمات و کلیدهای دسترسی
               </h1>
               <p className="mt-1 max-w-3xl text-[12px] leading-5 text-muted">
-                کلید در پایگاه‌دادهٔ محلی <code className="text-[11px]">db/pharmacy.sqlite</code>{" "}
-                ذخیره می‌شود، جایی که فقط سرور آن را می‌خواند؛ مرورگر همیشه نسخهٔ
-                پوشانده (۴ نویسهٔ آخر) را می‌بیند. پس از ذخیره، «تست کلید» یک
-                جستجوی واقعی «داروخانه» در ۵ کیلومتری اهواز انجام می‌دهد تا معلوم
-                شود کلید کار می‌کند یا نه.
+                کلیدهای نقشه و مدل زبانی در پایگاه‌دادهٔ محلی{" "}
+                <code className="text-[11px]">db/pharmacy.sqlite</code> ذخیره می‌شوند، جایی
+                که فقط سرور آن‌ها را می‌خواند؛ مرورگر همیشه نسخهٔ پوشانده (۴ نویسهٔ آخر)
+                را می‌بیند. «تست» هر کلید را با یک درخواست واقعی می‌سنجد: برای نشان و
+                گوگل جستجوی «داروخانه» در ۵ کیلومتری اهواز، و برای مدل زبانی یک پیام
+                کوتاه به همان دروازه.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -49,20 +53,32 @@ async function LiveSettings() {
         </div>
       </header>
 
-      <SettingsForm initial={providers} />
+      <LlmSettings initial={llm} />
+
+      <div className="mt-3">
+        <SettingsForm initial={providers} />
+      </div>
 
       <div className="mt-3 rounded-2xl border border-line bg-surface p-4 text-[11px] leading-5 text-muted">
         <b className="text-ink">این کلید کجا مصرف می‌شود؟</b> اسکریپت وارد‌کنندهٔ
         داروخانه‌ها (<code className="text-[10.5px]">etl/import_pharmacies.py</code>)
         همین کلید را از SQLite می‌خواند، برای هر شهرستان «داروخانه» را جستجو می‌کند
         و نقاط را در جدول <code className="text-[10.5px]">map_pharmacy</code>{" "}
-        می‌نویسد؛ نقشه همان لایه را بدون تغییر نشان می‌دهد. کلید <b className="text-ink">OpenRouter</b>{" "}
-        برای قضاوت نام‌هایی است که قاعده‌ها نمی‌توانند تعیین کنند: اسکریپت{" "}
-        <code className="text-[10.5px]">etl/classify_with_llm.py</code> فقط همان
-        ردیف‌های مبهم را با مدل انتخابی برچسب می‌زند (داروخانه، مطب، کلینیک، نامرتبط)
-        و نتیجه را در جدول <code className="text-[10.5px]">poi_classification</code>{" "}
-        نگه می‌دارد تا اجرای دوباره هزینه‌ای نداشته باشد. اگر پایگاه‌داده را از
-        صفر بسازید کلید هم پاک می‌شود — دوباره همین‌جا واردش کنید.
+        می‌نویسد؛ نقشه همان لایه را بدون تغییر نشان می‌دهد. بخش{" "}
+        <b className="text-ink">مدل زبانی</b> برای قضاوت نام‌هایی است که قاعده‌ها
+        نمی‌توانند تعیین کنند: اسکریپت{" "}
+        <code className="text-[10.5px]">etl/classify_with_llm.py</code> همین
+        ارائه‌دهنده، Base URL، مدل و کلید را از جدول{" "}
+        <code className="text-[10.5px]">app_setting</code> می‌خواند (کلیدهای{" "}
+        <code className="text-[10.5px]">llm_provider</code>،{" "}
+        <code className="text-[10.5px]">llm_base_url</code>،{" "}
+        <code className="text-[10.5px]">llm_model</code>،{" "}
+        <code className="text-[10.5px]">llm_api_key</code>) و فقط ردیف‌های مبهم را
+        برچسب می‌زند (داروخانه، مطب، کلینیک، نامرتبط)؛ نتیجه در{" "}
+        <code className="text-[10.5px]">poi_classification</code> می‌ماند تا اجرای
+        دوباره هزینه‌ای نداشته باشد. کلیدهای قدیمی OpenRouter هم هنوز خوانده
+        می‌شوند تا نصب‌های قبلی نشکنند. اگر پایگاه‌داده را از صفر بسازید کلیدها هم
+        پاک می‌شوند — دوباره همین‌جا واردشان کنید.
       </div>
     </>
   );
