@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { GET as checksGET, POST as checksPOST, DELETE as checksDELETE } from "@/app/api/checks/route";
 import { GET as capGET, POST as capPOST } from "@/app/api/capacity/route";
 import { GET as densGET } from "@/app/api/density/route";
-import { GET as prospGET, POST as prospPOST, PATCH as prospPATCH, DELETE as prospDELETE } from "@/app/api/prospects/route";
+import { GET as prospGET, POST as prospPOST, PATCH as prospPATCH, PUT as prospPUT, DELETE as prospDELETE } from "@/app/api/prospects/route";
 import { GET as survGET, POST as survPOST, PATCH as survPATCH, DELETE as survDELETE } from "@/app/api/surveys/route";
 import { GET as shortGET, POST as shortPOST, DELETE as shortDELETE } from "@/app/api/shortlist/route";
 import { GET as popGET, POST as popPOST, DELETE as popDELETE } from "@/app/api/population/route";
@@ -97,6 +97,37 @@ describe("prospects", () => {
 
     const del = await json(await prospDELETE(req(`/api/prospects?id=${id}`, undefined, "DELETE")));
     expect(del.status).toBe(200);
+  });
+
+  it("appends a new place to the end of the trip, with no cap", async () => {
+    const made: number[] = [];
+    for (const name of ["آزمون الف", "آزمون ب", "آزمون ج"]) {
+      const r = await json(await prospPOST(req("/api/prospects", { name, lat: 31.3, lon: 48.6 })));
+      made.push(r.body.id);
+    }
+    const list = await json(await prospGET());
+    const mine = list.body.items.filter((i: { id: number }) => made.includes(i.id));
+    // three appends → three increasing priorities, none of them clamped to a fixed menu
+    expect(mine.length).toBe(3);
+    const priorities = mine.map((i: { priority: number }) => i.priority);
+    expect(Math.max(...priorities) - Math.min(...priorities)).toBe(2);
+
+    // drag order = the sequence the UI sends
+    const reordered = await json(await prospPUT(req("/api/prospects", {
+      ids: [made[2], made[0], made[1]],
+    })));
+    expect(reordered.status).toBe(200);
+    const after = await json(await prospGET());
+    const byId = new Map<number, number>(
+      after.body.items.map((i: { id: number; priority: number }) => [i.id, i.priority]));
+    expect(byId.get(made[2])!).toBeLessThan(byId.get(made[0])!);
+
+    for (const id of made) await prospDELETE(req(`/api/prospects?id=${id}`, undefined, "DELETE"));
+  });
+
+  it("refuses an order payload that is not a list of ids", async () => {
+    expect((await json(await prospPUT(req("/api/prospects", { ids: [] })))).status).toBe(400);
+    expect((await json(await prospPUT(req("/api/prospects", { ids: ["a"] })))).status).toBe(400);
   });
 
   it("refuses a place without a name", async () => {

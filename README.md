@@ -570,20 +570,21 @@ On screen: a green ✓ beside the settlement dot, `✓ کوت نواصر` in the
 reload, a neighbourhood marked through the API shows its ✓, a second user's marks are
 invisible, unticking deletes the row.
 
-### The watch list has no cap (`/api/prospects`)
+### The watch list: no cap, and the order is dragged
 
-Reported as «I can only add 3 places». There was never a row limit — **priority was clamped
-to 1..3**, which read as «three places allowed». Priority now runs **1-9**, the list holds any
-number, and the panel stays usable as it grows:
+There was never a row limit — the first version **clamped priority to 1..3**, which read as
+«only three places allowed», and the add form still offered a 1..9 dropdown that looked like a
+size limit. Both are gone:
 
-* status filters — همه / در انتظار / بازدید‌شده / رد‌شده — with counts;
-* a search box that appears once the list passes six entries;
-* the priority badge is a button: click it to move a place up or down the trip;
-* the list scrolls (max-h-72) instead of pushing the rest of the sidebar off screen.
+* a new place is **appended** (`priority = max + 1`), and the list holds any number;
+* the 1..9 dropdown is removed from the add form entirely;
+* the order is set by **dragging a row** — pointer events, not HTML5 `draggable`, so it works
+  with a finger on a tablet in the field;
+* `PUT /api/prospects { ids: [...] }` writes the whole sequence in one transaction, so the
+  database cannot be left half-sorted if one update fails.
 
-`tools/test_visitlist.py` creates 14 places (priorities up to 9), checks all 14 render, filters
-to the 3 visited ones, clicks a priority badge and verifies the database follows, then adds a
-15th while the page is open.
+`tools/test_visit_order.py`: six places stored, priorities 1..6 on append, the last row dragged
+to the top and the order re-read from the API, and the add form asserted to carry no `<select>`.
 
 ### Population: every source, and a manual override that wins (`/api/population`)
 

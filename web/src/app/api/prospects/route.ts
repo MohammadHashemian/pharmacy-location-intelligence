@@ -10,9 +10,9 @@
  *   DELETE ?id=<id>
  *
  * Status is deliberately small: `todo` (go look), `visited` (been there), `rejected`
- * (checked, not viable). Priority is a trip order, 1-9, and there is **no cap on how many
- * places the list holds** — the first version clamped priority to 1-3, which read as «only
- * three places allowed».
+ * (checked, not viable). Priority is a trip ORDER, not a category: a new place is appended at
+ * the end (max + 1) and `PUT` rewrites the whole order when the list is dragged into shape.
+ * There is no cap on how many places the list holds and none on the number's range.
  */
 import { NextResponse } from "next/server";
 import { all, one, run } from "@/lib/db";
@@ -64,7 +64,12 @@ export async function POST(req: Request) {
   const note = String(body.note ?? "").trim() || null;
   const status = STATUS.includes(body.status as (typeof STATUS)[number])
     ? (body.status as string) : "todo";
-  const priority = Math.min(9, Math.max(1, Math.round(Number(body.priority) || 2)));
+  const given = Number(body.priority);
+  const priority = Number.isFinite(given) && given > 0
+    ? Math.round(given)
+    : (one<{ p: number }>(
+        "SELECT COALESCE(MAX(priority), 0) + 1 AS p FROM prospect WHERE user_id = ?",
+        [u.id])?.p ?? 1);
 
   if (name.length < 2 || name.length > 120) {
     return NextResponse.json({ error: "نام باید بین ۲ تا ۱۲۰ نویسه باشد" }, { status: 400 });
@@ -117,7 +122,7 @@ export async function PATCH(req: Request) {
   }
   if (body.priority !== undefined) {
     sets.push("priority = ?");
-    args.push(Math.min(9, Math.max(1, Math.round(Number(body.priority) || 2))));
+    args.push(Math.max(1, Math.round(Number(body.priority) || 1)));
   }
   if (!sets.length) {
     return NextResponse.json({ ok: true, id, unchanged: true });
@@ -127,6 +132,37 @@ export async function PATCH(req: Request) {
   const updated = one("SELECT id, name, lat, lon, note, status, priority, visited_at AS visitedAt"
                       + " FROM prospect WHERE id = ?", [id]);
   return NextResponse.json({ ok: true, item: updated });
+}
+
+/**
+ * Reorder the whole trip at once — `{ ids: [12, 7, 31, …] }`.
+ *
+ * Drag and drop produces a new sequence, not a series of pairwise swaps; sending the sequence
+ * means the database can never be left half-ordered if one request in a chain fails.
+ */
+export async function PUT(req: Request) {
+  ensureTable();
+  const u = currentUser();
+  const body = (await req.json().catch(() => ({}))) as { ids?: unknown };
+  const ids = Array.isArray(body.ids) ? body.ids.map(Number) : null;
+  if (!ids || !ids.length || ids.some((n) => !Number.isInteger(n))) {
+    return NextResponse.json({ error: "فهرست شناسه‌ها نامعتبر است" }, { status: 400 });
+  }
+  const owned = new Set(
+    all<{ id: number }>("SELECT id FROM prospect WHERE user_id = ?", [u.id]).map((r) => r.id),
+  );
+  const clean = ids.filter((id) => owned.has(id));
+  run("BEGIN");
+  try {
+    clean.forEach((id, i) => {
+      run("UPDATE prospect SET priority = ? WHERE id = ? AND user_id = ?", [i + 1, id, u.id]);
+    });
+    run("COMMIT");
+  } catch (e) {
+    run("ROLLBACK");
+    return NextResponse.json({ error: `ثبت ترتیب ناموفق بود: ${String(e)}` }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, ordered: clean.length });
 }
 
 export async function DELETE(req: Request) {

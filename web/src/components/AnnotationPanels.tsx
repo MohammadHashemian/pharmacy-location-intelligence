@@ -25,17 +25,56 @@ export function VisitPanel({
   onFocus,
   onCycle,
   onRemove,
-  onPriority,
+  onOrder,
 }: {
   items: Prospect[];
   onFocus: (p: Prospect) => void;
   onCycle: (p: Prospect) => void;
   onRemove: (p: Prospect) => void;
-  /** reorder the trip: priority is 1-9 and the list has no size limit */
-  onPriority: (p: Prospect, next: number) => void;
+  /** the whole trip in its new order — one call, so the list cannot end up half-sorted */
+  onOrder: (ids: number[]) => void;
 }) {
   const [filter, setFilter] = useState<"all" | Prospect["status"]>("all");
   const [q, setQ] = useState("");
+  /* Pointer-based drag, not the HTML5 drag events: the list is used on a tablet in the field,
+     where `draggable` does nothing, and a synthetic `dragstart` cannot be driven by a test.
+     A press on the handle starts a drag; the row under the pointer is the drop target. */
+  const [dragId, setDragId] = useState<number | null>(null);
+  const [overId, setOverId] = useState<number | null>(null);
+
+  const move = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0) return;
+    const ids = items.map((p) => p.id);
+    const [id] = ids.splice(from, 1);
+    ids.splice(to, 0, id);
+    onOrder(ids);
+  };
+
+  /* Listeners are attached on the press itself, not in an effect: an effect runs after React
+     has re-rendered, and the first pointermove can arrive before that. */
+  const startDrag = (id: number) => {
+    if (filter !== "all" || q.trim()) return;
+    setDragId(id);
+    setOverId(id);
+    const at = (x: number, y: number) => {
+      const el = document.elementFromPoint(x, y) as HTMLElement | null;
+      const li = el?.closest("li[data-prospect]") as HTMLElement | null;
+      return li ? Number(li.dataset.prospect) : null;
+    };
+    const onMove = (ev: PointerEvent) => {
+      const over = at(ev.clientX, ev.clientY);
+      if (over !== null) setOverId(over);
+    };
+    const onUp = (ev: PointerEvent) => {
+      const over = at(ev.clientX, ev.clientY);
+      if (over !== null) move(items.findIndex((p) => p.id === id), items.findIndex((p) => p.id === over));
+      setDragId(null);
+      setOverId(null);
+      window.removeEventListener("pointermove", onMove);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  };
 
   const todo = items.filter((p) => p.status === "todo").length;
   const shown = items
@@ -91,16 +130,33 @@ export function VisitPanel({
               return (
                 <li
                   key={p.id}
-                  className="flex items-center gap-1 rounded-lg border border-line/70 px-1.5 py-1"
+                  data-prospect={p.id}
+                  className={`flex items-center gap-1 rounded-lg border px-1.5 py-1 transition ${
+                    dragId === p.id ? "opacity-40" : ""
+                  } ${
+                    overId === p.id ? "border-accent bg-accent-soft/40" : "border-line/70"
+                  }`}
                 >
-                  <button
-                    type="button"
-                    onClick={() => onPriority(p, p.priority >= 9 ? 1 : p.priority + 1)}
-                    title="اولویت سفر را عوض کنید (۱ تا ۹)"
-                    className="tnum w-4 shrink-0 rounded text-[9px] text-faint hover:bg-surface-2 hover:text-ink"
+                  <span
+                    role="button"
+                    aria-label={`جابه‌جایی ${p.name}`}
+                    data-grip={`prospect-${p.id}`}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      startDrag(p.id);
+                    }}
+                    className="cursor-grab select-none px-0.5 text-[10px] text-faint hover:text-ink"
+                    title={
+                      filter === "all" && !q.trim()
+                        ? "بکشید تا ترتیب سفر عوض شود"
+                        : "برای جابه‌جایی، فیلتر را روی «همه» بگذارید"
+                    }
                   >
+                    ⠿
+                  </span>
+                  <span className="tnum w-4 shrink-0 text-center text-[9px] text-faint">
                     {p.priority}
-                  </button>
+                  </span>
                   <button
                     type="button"
                     onClick={() => onFocus(p)}
@@ -141,8 +197,8 @@ export function VisitPanel({
         </>
       ) : (
         <p className="text-[10.5px] leading-5 text-muted">
-          روی نقشه جایی را که باید ببینید «نشان‌گذاری» کنید تا این فهرست پر شود؛ تعدادش محدود
-          نیست و با اولویت ۱ تا ۹ مرتب می‌شود.
+          روی نقشه جایی را که باید ببینید «نشان‌گذاری» کنید؛ هر مکان به انتهای فهرست اضافه
+          می‌شود و تعدادش هیچ سقفی ندارد. ترتیب سفر را بعداً با کشیدن ردیف‌ها تعیین کنید.
         </p>
       )}
     </div>

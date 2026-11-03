@@ -757,7 +757,6 @@ export function KhuzestanMap({ data }: { data: MapData }) {
   const [markPin, setMarkPin] = useState<{ lat: number; lon: number } | null>(null);
   const [markName, setMarkName] = useState("");
   const [markNote, setMarkNote] = useState("");
-  const [markPriority, setMarkPriority] = useState(2);
   const [markBusy, setMarkBusy] = useState(false);
   const [popDraft, setPopDraft] = useState("");
   const [popBusy, setPopBusy] = useState(false);
@@ -3430,39 +3429,37 @@ export function KhuzestanMap({ data }: { data: MapData }) {
 
           {markMode && markPin ? (
             <div className="absolute bottom-2 right-2 z-30 w-[276px] max-w-[86vw] rounded-xl border border-accent/40 bg-surface p-2.5 text-[11px] shadow-xl">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-baseline justify-between gap-2">
                 <b className="text-[12px] text-ink">مکان برای بازدید</b>
-                <span className="text-[9.5px] text-faint">
-                  <bdi dir="ltr">{markPin.lat.toFixed(5)}, {markPin.lon.toFixed(5)}</bdi>
-                </span>
+                <span className="text-[9px] text-faint">مختصات</span>
               </div>
+              <div className="mt-0.5 rounded-md bg-surface-2 px-1.5 py-0.5 text-center text-[9.5px] text-muted">
+                <bdi dir="ltr">{markPin.lat.toFixed(5)}, {markPin.lon.toFixed(5)}</bdi>
+              </div>
+
+              <label className="mt-2 block text-[10px] text-muted" htmlFor="mark-name">
+                نام مکان
+              </label>
               <input
+                id="mark-name"
                 autoFocus
                 value={markName}
                 onChange={(e) => setMarkName(e.target.value)}
-                placeholder="نام مکان (مثلاً نبش خیابان …)"
-                className="mt-1.5 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11.5px] text-ink placeholder:text-faint"
+                onKeyDown={(e) => { if (e.key === "Enter" && markName.trim().length >= 2) e.currentTarget.blur(); }}
+                placeholder="نبش خیابان، کوی …"
+                className="mt-0.5 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11.5px] text-ink placeholder:text-faint"
               />
+
+              <label className="mt-1.5 block text-[10px] text-muted" htmlFor="mark-note">
+                یادداشت <span className="text-faint">(اختیاری)</span>
+              </label>
               <input
+                id="mark-note"
                 value={markNote}
                 onChange={(e) => setMarkNote(e.target.value)}
-                placeholder="یادداشت: اجاره، متراژ، تماس…"
-                className="mt-1 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11px] text-ink placeholder:text-faint"
+                placeholder="اجاره، متراژ، شمارهٔ تماس…"
+                className="mt-0.5 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-[11px] text-ink placeholder:text-faint"
               />
-              <label className="mt-1 flex items-center gap-1.5 text-[10.5px] text-muted">
-                اولویت سفر
-                <select
-                  value={markPriority}
-                  onChange={(e) => setMarkPriority(Number(e.target.value))}
-                  className="rounded-md border border-line-strong bg-surface-2 px-1 py-0.5 text-[11px] text-ink"
-                >
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
-                    <option key={n} value={n}>
-                      {n === 1 ? "۱ — اول" : n === 9 ? "۹ — آخر" : toPersianDigits(n)}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <div className="mt-1.5 flex items-center gap-1.5">
                 <button
                   type="button"
@@ -3477,7 +3474,6 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                         lat: markPin.lat,
                         lon: markPin.lon,
                         note: markNote,
-                        priority: markPriority,
                       }),
                     });
                     setMarkBusy(false);
@@ -4074,11 +4070,11 @@ export function KhuzestanMap({ data }: { data: MapData }) {
             await fetch(`/api/prospects?id=${p.id}`, { method: "DELETE" });
             router.refresh();
           }}
-          onPriority={async (p, next) => {
+          onOrder={async (ids) => {
             await fetch("/api/prospects", {
-              method: "PATCH",
+              method: "PUT",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: p.id, priority: next }),
+              body: JSON.stringify({ ids }),
             });
             router.refresh();
           }}

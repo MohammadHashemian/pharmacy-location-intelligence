@@ -57,6 +57,7 @@ python tools/test_opportunity.py       # the capital never shows as «opportunit
 python tools/test_capacity.py          # coverage metrics + benchmark dial
 python tools/test_font_sizes.py        # type size is container-independent
 python tools/test_annotations.py       # visit list + surveyed areas, per user
+python tools/test_visit_order.py       # unlimited list, drag to reorder, no priority dropdown
 python tools/test_per_user_visits.py   # two users, two lists, one table
 python tools/test_fixture_isolation.py # cleanup cannot reach the owner's data
 ```
