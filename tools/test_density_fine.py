@@ -82,11 +82,13 @@ def main() -> int:
         pg.wait_for_timeout(3500)
         drawn = pg.evaluate("() => document.querySelectorAll('g[data-layer=\"density-fine\"] rect').length")
         check("the fine layer draws", drawn > 500, f"{drawn} cells")
-        legend = pg.locator('[data-legend="fine-density"]')
+        legend = pg.locator('[data-legend="map"]')
         check("the legend is on the map", legend.count() == 1)
         text = legend.inner_text()
         check("the legend names the radius and the cell size",
               "۸۰۰" in text and "۲۰۰" in text, text.splitlines()[0])
+        bands = legend.locator("li").count()
+        check("every band is a row of its own", bands >= 4, f"{bands} rows")
         fills = pg.evaluate("""() => {
           const out = new Map();
           document.querySelectorAll('g[data-layer="density-fine"] rect').forEach((r) => {

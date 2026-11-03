@@ -2864,6 +2864,52 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               : "relative mx-auto w-full min-w-0"
           }
         >
+          {mode === "dens" || mode === "opp" || mode === "cap" ? (
+            <div className="pointer-events-none sticky top-2 z-20 h-0 ps-2">
+              <div className="flex justify-start">
+                <LegendCard
+                  title={mode === "dens" ? "نفر به ازای هر داروخانه"
+                    : mode === "opp" ? "تقاضای بدون پوشش"
+                    : "ظرفیت باقی‌مانده"}
+                  items={
+                    mode === "dens"
+                      ? (() => {
+                          const b = fine?.benchmark ?? 5408;
+                          const f = (n: number) => Math.round(n).toLocaleString("fa-IR");
+                          return [
+                            { colour: "#14b8a6", label: `کمتر از ${f(b / 2)}` },
+                            { colour: "#65a30d", label: `${f(b / 2)} تا ${f(b)}` },
+                            { colour: "#f59e0b", label: `${f(b)} تا ${f(b * 1.6)}` },
+                            { colour: "#dc2626", label: `بیش از ${f(b * 1.6)}` },
+                            { colour: "#94a3b8", label: "بدون داروخانه در ۸۰۰ متر" },
+                          ];
+                        })()
+                      : mode === "opp"
+                        ? [
+                            { colour: oppColour(300), label: "۳۰۰ – ۶۰۰" },
+                            { colour: oppColour(900), label: "۶۰۰ – ۱٬۵۰۰" },
+                            { colour: oppColour(2000), label: "۱٬۵۰۰ – ۳٬۰۰۰" },
+                            { colour: oppColour(3500), label: "بیش از ۳٬۰۰۰" },
+                            { colour: "#94a3b8", label: "آمار ناقص" },
+                          ]
+                        : [
+                            { colour: "#dc2626", label: "اشباع — جای تازه نیست" },
+                            { colour: "#16a34a", label: "جای رشد" },
+                            { colour: "#f59e0b", label: "بدون داروخانهٔ نزدیک" },
+                            { colour: "#94a3b8", label: "آمار ناقص" },
+                          ]
+                  }
+                  note={
+                    mode === "dens"
+                      ? "هر سلول ۲۰۰ متر · شعاع ۸۰۰ متر · ارقام: نفر برای هر داروخانه"
+                      : mode === "opp"
+                        ? "هر سلول ۰٫۵ کیلومتر · ارقام: نفر بدون ظرفیت در همان سلول"
+                        : "بر پایهٔ همان سلول: جمعیت منهای ظرفیت داروخانه‌های نزدیک"
+                  }
+                />
+              </div>
+            </div>
+          ) : null}
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
@@ -3969,64 +4015,8 @@ export function KhuzestanMap({ data }: { data: MapData }) {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="flex h-2 w-24 overflow-hidden rounded-full">
-              {mode === "dens" ? (
-                <div
-                  data-legend="fine-density"
-                  className="pointer-events-none absolute bottom-2 right-2 z-20 rounded-xl border border-line bg-surface/95 px-2.5 py-2 text-[10px] shadow-lg"
-                >
-                  <div className="mb-1 font-semibold text-ink">نفر به ازای هر داروخانه</div>
-                  <div className="flex items-center gap-1.5">
-                    {[
-                      ["#14b8a6", `زیر ${Math.round((fine?.benchmark ?? 5408) / 2).toLocaleString("fa-IR")}`],
-                      ["#65a30d", `تا ${(fine?.benchmark ?? 5408).toLocaleString("fa-IR")}`],
-                      ["#f59e0b", `تا ${Math.round((fine?.benchmark ?? 5408) * 1.6).toLocaleString("fa-IR")}`],
-                      ["#dc2626", "بیشتر"],
-                    ].map(([c, l], i) => (
-                      <span key={i} className="flex flex-col items-center gap-0.5">
-                        <span className="inline-block h-3 w-5 rounded-sm" style={{ backgroundColor: c }} />
-                        <span className="text-[7.5px] text-muted">{l}</span>
-                      </span>
-                    ))}
-                  </div>
-                  <div className="mt-1 text-[9px] text-muted">
-                    شعاع ۸۰۰ متر · هر سلول ۲۰۰ متر · مبنا {fine ? fine.benchmark.toLocaleString("fa-IR") : "—"} نفر
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-1 text-[9px] text-muted">
-                    <span className="inline-block h-2 w-3 rounded-sm bg-[#94a3b8]" /> بدون داروخانه در ۸۰۰ متر
-                  </div>
-                </div>
-              ) : null}
 
-              {mode === "opp" ? (
-                <div className="flex items-center gap-2 text-[10px] text-muted">
-                  <span>تقاضای بدون پوشش:</span>
-                  {[[0, "کم"], [400, ""], [1200, ""], [2600, "زیاد"]].map(([v, label], i) => (
-                    <span key={i} className="flex items-center gap-1">
-                      <span
-                        className="inline-block h-2 w-3 rounded-sm"
-                        style={{ backgroundColor: oppColour(Number(v)) }}
-                      />
-                      {label ? <span>{label}</span> : null}
-                    </span>
-                  ))}
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block h-2 w-3 rounded-sm bg-[#94a3b8]" /> آمار ناقص
-                  </span>
-                </div>
-              ) : null}
-              {mode === "cap" ? (
-                <div className="flex items-center gap-2 text-[10px] text-muted">
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block h-2 w-2 rounded-full bg-[#dc2626]" /> اشباع
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block h-2 w-2 rounded-full bg-[#16a34a]" /> جای رشد
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block h-2 w-2 rounded-full bg-[#f59e0b]" /> بدون دسترسی
-                  </span>
-                </div>
-              ) : null}
+
               {(mode === "dens" ? DENS_RAMP : mode === "gap" ? GAP_RAMP : RATIO_RAMP).map((c) => (
                 <span key={c} className="flex-1" style={{ background: c }} />
               ))}
@@ -4850,3 +4840,43 @@ function downloadCsv(rows: MapSettlement[], target: number) {
   URL.revokeObjectURL(a.href);
 }
 
+
+/**
+ * The map's legend, used by every computed mode.
+ *
+ * Rows stack vertically with the swatch on the same baseline as its label: the earlier version
+ * spread the bands in a horizontal strip, which squeezed the numbers under the colours, mixed
+ * their order and pushed the long «بدون داروخانه» label against the border.
+ */
+function LegendCard({
+  title,
+  items,
+  note,
+}: {
+  title: string;
+  items: { colour: string; label: string }[];
+  note: string;
+}) {
+  return (
+    <div
+      data-legend="map"
+      className="pointer-events-auto w-[200px] max-w-[62vw] rounded-xl border border-line bg-surface/97 px-2.5 py-2 shadow-lg"
+    >
+      <div className="text-[11px] font-semibold text-ink">{title}</div>
+      <ul className="mt-1 space-y-[3px]">
+        {items.map((it) => (
+          <li key={it.label} className="grid grid-cols-[10px_1fr] items-center gap-x-1.5">
+            <span
+              className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-black/5"
+              style={{ backgroundColor: it.colour }}
+            />
+            <span className="tabular-nums text-[10px] leading-[1.5] text-ink-soft">{it.label}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-1.5 border-t border-line/70 pt-1 text-[9px] leading-[1.5] text-muted">
+        {note}
+      </div>
+    </div>
+  );
+}

@@ -81,7 +81,7 @@ def main() -> int:
         check("the layer draws", drawn > 200, f"{drawn} cells")
         check("small gaps are not drawn as opportunity", drawn < len(hot),
               f"{drawn} of {len(hot)} hot cells")
-        check("the legend is on the map", pg.locator('[data-legend="opportunity"]').count() == 1)
+        check("the legend is on the map", pg.locator('[data-legend="map"]').first.count() == 1)
         check("competing markers are off in this mode",
               pg.evaluate("() => !!document.querySelector('g[data-layer=\"settlements\"]')?.style.display") is False
               or pg.evaluate("() => document.querySelectorAll('g[data-layer=\"settlements\"]').length") == 1)
