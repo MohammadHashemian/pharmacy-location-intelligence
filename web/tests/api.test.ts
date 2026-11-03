@@ -17,6 +17,7 @@ import { GET as phGET, POST as phPOST, PATCH as phPATCH, DELETE as phDELETE } fr
 import { GET as setGET, POST as setPOST } from "@/app/api/settings/route";
 import { GET as measGET, POST as measPOST, DELETE as measDELETE } from "@/app/api/measure/route";
 import { POST as ovPOST, DELETE as ovDELETE } from "@/app/api/overrides/route";
+import { GET as reportGET } from "@/app/api/report/route";
 import { all } from "@/lib/db";
 
 const json = async (r: Response) => ({ status: r.status, body: await r.json() });
@@ -258,6 +259,22 @@ describe("measure", () => {
         await measDELETE(req(`/api/measure?id=${m.id}`, undefined, "DELETE"));
       }
     }
+  });
+});
+
+describe("regional report", () => {
+  it("returns the stored report for an area", async () => {
+    const { status, body } = await json(await reportGET(req("/api/report?area_id=212", undefined, "GET")));
+    expect(status).toBe(200);
+    expect(body.area.name).toBeTruthy();
+    expect(body.supply.register).toBeGreaterThan(0);
+    expect(Array.isArray(body.spots)).toBe(true);
+    expect(body.streets).toBeTruthy();
+  });
+
+  it("404s for an area that was never built, and 400s without an id", async () => {
+    expect((await json(await reportGET(req("/api/report?area_id=999999", undefined, "GET")))).status).toBe(404);
+    expect((await json(await reportGET(req("/api/report", undefined, "GET")))).status).toBe(400);
   });
 });
 

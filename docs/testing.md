@@ -44,7 +44,7 @@ Files:
 | `analysis.test.ts` | OTC buying power, percentiles, held-out rows, header summary |
 | `scoring.test.ts` | population modes, outliers, `scorePlaces` determinism and invariants |
 | `loaders.test.ts` | the three page loaders against the real schema |
-| `api.test.ts` | every route, including the refusal paths (400s) |
+| `api.test.ts` | every route, including the refusal paths (400s) and the regional report |
 | `routes-misc.test.ts` | photo proxy validation, tile zoom bounds, key-check refusals |
 | `tableFilter.test.ts` | column filters: Persian/Latin digits, one-ended and crossed ranges, unknown values never pass a range, substring and pick lists |
 | `llm.test.ts` | provider presets, base-URL normalisation (a pasted `/chat/completions` is accepted), model/key validation, save → mask → clear round trip, legacy `openrouter_*` fallback, and the two LLM routes' 400s |
@@ -62,6 +62,7 @@ python tools/test_capacity.py          # coverage metrics + benchmark dial
 python tools/test_font_sizes.py        # type size is container-independent
 python tools/test_annotations.py       # visit list + surveyed areas, per user
 python tools/test_visit_order.py       # unlimited list, drag to reorder, no priority dropdown
+python etl/area_report.py --area-id 212 --llm   # builds the regional report (not a test)
 python tools/test_per_user_visits.py   # two users, two lists, one table
 python tools/test_fixture_isolation.py # cleanup cannot reach the owner's data
 ```

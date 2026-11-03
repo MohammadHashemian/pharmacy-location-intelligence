@@ -4325,6 +4325,15 @@ export function KhuzestanMap({ data }: { data: MapData }) {
                 : "علامت‌گذاری به‌عنوان بررسی‌شده"}
             </button>
 
+            <a
+              href={`/report/${selectedS.id}`}
+              data-report-link={selectedS.id}
+              className="mt-1 flex w-full items-center justify-center gap-1 rounded-lg border border-brand/40 bg-brand-soft px-2 py-1 text-[10.5px] font-medium text-brand-ink"
+              title="تحلیل کامل این منطقه: عرضه، مراکز درمانی، خیابان‌ها و نقاط پیشنهادی"
+            >
+              گزارش منطقه ↗
+            </a>
+
             <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
               {[
                 ["جمعیت", fmtPop(selectedS.pop)],

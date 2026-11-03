@@ -11,6 +11,7 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const live = path.resolve(__dirname, "..", "..", "db", "pharmacy.sqlite");
 const dir = path.resolve(__dirname, "..", ".tmp-tests");
@@ -28,7 +29,25 @@ for (const f of readdirSync(dir)) {
   }
 }
 
-if (!existsSync(copy)) {
-  copyFileSync(live, copy);
+/* Fold the WAL into the main file first. Without this the copy can miss the newest tables
+   and rows — the report table is created by an ETL run and lives in the log for a while. */
+try {
+  const db = new DatabaseSync(live);
+  db.exec("PRAGMA wal_checkpoint(FULL)");
+  db.close();
+} catch {
+  /* a reader holding the file is not fatal: the copy below still carries every committed page */
+}
+
+/* Several workers copy at once; on Windows an EBUSY here is a timing problem, not a failure. */
+for (let attempt = 0; attempt < 8; attempt++) {
+  try {
+    copyFileSync(live, copy);
+    break;
+  } catch (e) {
+    if (attempt === 7) throw e;
+    const until = Date.now() + 300;
+    while (Date.now() < until) { /* short, synchronous backoff: setup runs before the tests */ }
+  }
 }
 process.env.PHARMACY_DB = copy;

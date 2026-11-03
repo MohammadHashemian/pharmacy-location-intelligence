@@ -452,6 +452,22 @@ without touching the grid, and the map recolours:
 Ahvaz (1.2 M) is saturated and absent from the «room» ranking, the benchmark dial moves the
 saturated count 83 → 32 and back, and the map draws all four colours.
 
+### Regional report — `etl/area_report.py` → `/report/<area_id>`
+
+Clicking «گزارش منطقه» on any settlement opens one page with everything the tool knows about
+that town: population, built footprint and density, the FDA register against the pins we have
+mapped, medical centres by kind, the road network (classified arteries where OSM has them,
+measured ≥ 400 m corridors where it does not), the unmet-demand cells inside the town, and a
+scored list of corners — on a corridor, away from an existing pharmacy, near demand.
+
+The prose on that page is written by the configured model **from a Persian facts block**, then
+post-processed: `key=value` dumps and bare English road classes are stripped before they reach
+the screen. Rebuild it from the page (`ساخت تحلیل`) or with:
+
+```bash
+python etl/area_report.py --area-id 212 --llm
+```
+
 ### Density at street scale (`density_cell`, 200 m)
 
 The old density was a settlement number painted over a 1 km grid, and supply was counted per

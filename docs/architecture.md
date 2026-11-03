@@ -27,6 +27,8 @@ writes, and nothing the user typed lives in those tables.
 | `density_grid.py` | `density_cell` | 200 m cells: residents per pharmacy within an 800 m walk |
 | `opportunity_grid.py` | `opportunity_cell` | unmet demand per cell — «کجا جا هست» |
 | `prefetch_sat.py` | `data/tiles/sat/**` | satellite tiles on disk, one network call per tile ever |
+| `area_report.py` | `area_report` | one town: supply, medical, streets, unmet demand, scored corners, written analysis |
+| `fetch_area_osm.py` | `web/public/geo/streets_area-*.json`, `area_poi` | the road network and health POIs for a single bbox |
 
 Convention: **a wrong number is worse than a missing one.** A settlement without a coordinate is
 counted, never guessed (`nMissingCoord`); a pharmacy without a name is shown but excluded from
@@ -68,6 +70,9 @@ src/components/*.tsx       client components; receive plain JSON only
 * **Per user**: `lib/user.ts#currentUser()` is the only place identity is decided. Every
   annotation table carries `user_id` and every query filters on it, so authentication only has
   to replace that function.
+* **Regional report**: `/report/<area_id>` renders `area_report.payload`, built by
+  `etl/area_report.py`. The numbers are computed (SQL + street geometry); the model only writes
+  the prose, and its text is post-processed so no `key=value` leaks into a Persian page.
 * **Big computed surfaces are fetched per viewport** (`/api/density?bbox=…`) rather than shipped
   with the page: 80,000 cells would triple the payload to draw a corner of it.
 * **Table filters are client state over the rows already shipped** (`lib/tableFilter.ts` +
