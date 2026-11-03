@@ -155,10 +155,59 @@ const EMPTY: DashboardData = {
   observedAt: null,
 };
 
+/**
+ * Pharmacies a person added by hand, joined onto the FDA rows.
+ *
+ * The dashboard reads the FDA snapshot, which knows nothing about a pin somebody dropped on the
+ * map — so a village that had zero registered shops stayed at zero after two were added. The
+ * map layer already counts them (`v_map_settlement.pharmacy_assigned`); this brings the same
+ * numbers into the dashboard by matching the area name to the place name, ignoring the
+ * administrative prefix («روستای عین دو» ↔ «عین دو»).
+ */
+function manualByPlace(): Map<string, number> {
+  const rows = all<{ place: string; county: string; n: number }>(`
+    SELECT s.name AS place, s.county AS county, COUNT(*) AS n
+      FROM manual_place m
+      JOIN v_map_settlement s ON s.area_id = m.nearest_area_id
+     WHERE m.kind = 'pharmacy'
+     GROUP BY 1, 2`);
+  const strip = (v: string) =>
+    v.replace(/^(شهرستان|بخش|شهر|شهرک|روستای|روستاي|روستا|دهستان|ده|آبادی)\s+/u, "").trim();
+  const out = new Map<string, number>();
+  for (const r of rows) {
+    const key = `${strip(r.place)}|${strip(r.county)}`;
+    out.set(key, (out.get(key) ?? 0) + r.n);
+  }
+  return out;
+}
+
 export function loadDashboardData(): DashboardData {
   if (!dbReady()) return EMPTY;
 
-  const places = all<PlaceMetrics>(PLACE_SQL);
+  const raw = all<PlaceMetrics>(PLACE_SQL);
+  /* a manual pin adds to the count the board shows and to the ratio it computes */
+  const manual = manualByPlace();
+  const strip = (v: string | null) =>
+    (v ?? "").replace(/^(شهرستان|بخش|شهر|شهرک|روستای|روستاي|روستا|دهستان|ده|آبادی)\s+/u, "").trim();
+  const places = raw.map((p) => {
+    const extra = manual.get(`${strip(p.place)}|${strip(p.county)}`) ?? 0;
+    if (!extra) return p;
+    const total = p.n_pharmacy_total + extra;
+    const pop = p.fda_population ?? 0;
+    return {
+      ...p,
+      /* the scoring pass rebuilds the total from real + legal, so the pin has to join the
+         real count — setting only n_pharmacy_total is silently overwritten downstream */
+      n_pharmacy_real: p.n_pharmacy_real + extra,
+      n_pharmacy_total: total,
+      manual_mapped: extra,
+      population_per_pharmacy: total > 0 && pop > 0 ? Math.round(pop / total) : p.population_per_pharmacy,
+      pharmacies_per_100k: pop > 0 ? Math.round((total / pop) * 100_000 * 100) / 100 : p.pharmacies_per_100k,
+      dq_flags: (p.dq_flags ?? "").includes("no_fda_data") && total > 0
+        ? (p.dq_flags ?? "").replace("no_fda_data", "").replace(/^,|,$/g, "")
+        : p.dq_flags,
+    } as PlaceMetrics;
+  });
 
   const counties = all<CountyMetrics>(`
     SELECT province, county, n_places, n_cities, n_villages, population,

@@ -81,6 +81,8 @@ export interface PlaceMetrics {
   city_score: number | null;
   min_score: number | null;
 
+  /** Pharmacies a person pinned by hand onto this place (adds to the registered count). */
+  manual_mapped?: number;
   n_pharmacy_real: number;
   n_pharmacy_legal: number;
   n_pharmacy_total: number;

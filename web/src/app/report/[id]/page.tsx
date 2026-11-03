@@ -246,7 +246,10 @@ async function LiveReport({ id }: { id: string }) {
                   <td className="px-1 py-1">{s.gap > 0 ? group(s.gap) : "—"}</td>
                   <td className="px-1 py-1 font-medium text-brand-ink">{num(s.score, 1)}</td>
                   <td className="px-1 py-1">
-                    <Link href={`/map?lat=${s.lat}&lon=${s.lon}&k=16`} className="text-brand-ink underline">
+                    <Link
+                      href={`/map?lat=${s.lat}&lon=${s.lon}&k=16&spot=${s.lat},${s.lon}&spotName=${encodeURIComponent(`پیشنهاد ${i + 1}`)}`}
+                      className="text-brand-ink underline"
+                    >
                       باز کن
                     </Link>
                   </td>

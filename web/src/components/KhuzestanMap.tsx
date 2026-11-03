@@ -424,7 +424,15 @@ export function KhuzestanMap({ data }: { data: MapData }) {
     /* ?settle=<area_id> opens a settlement card — used by links and by the tests */
     const st = Number(q.get("settle"));
     if (Number.isInteger(st) && st > 0) setSelected(st);
+    /* ?spot=31.26038,48.6516&spotName=… — the candidate pin from a regional report */
+    const sp = (q.get("spot") ?? "").split(",").map(Number);
+    if (sp.length === 2 && sp.every(Number.isFinite)) {
+      setSpot({ lat: sp[0], lon: sp[1], name: q.get("spotName") ?? "نقطهٔ پیشنهادی" });
+    }
   }, [data.pharmacies, data.medical]);
+  /* A «spot» is a point a report recommended: `?spot=lat,lon&spotName=…` drops a ring on the
+     map so the link lands on something visible instead of an empty frame. */
+  const [spot, setSpot] = useState<{ lat: number; lon: number; name: string } | null>(null);
   const [selMed, setSelMed] = useState<number | null>(null);
   const [hoverMed, setHoverMed] = useState<{ i: number; x: number; y: number } | null>(null);
   const [hoverPharm, setHoverPharm] = useState<{
@@ -3119,6 +3127,34 @@ export function KhuzestanMap({ data }: { data: MapData }) {
               {opportunityLayer}
               <g data-layer="network">{layers.network ? edgeLayer : null}</g>
               {/* 3,677 settlement dots hide twelve pins: reviewing them is a different map */}
+              {spot ? (() => {
+                const [sx, sy] = scene.proj(spot.lat, spot.lon);
+                return (
+                  <g data-layer="spot" pointerEvents="none">
+                    {/* solid, because a pale marker loses against both the imagery and the
+                        orange pharmacy diamonds — and this pin is the whole point of the link */}
+                    <circle cx={sx} cy={sy} r={22 / view.k} fill="#ea580c" fillOpacity={0.20} />
+                    <circle cx={sx} cy={sy} r={9 / view.k} fill="#ea580c" stroke="#ffffff" strokeWidth={fs(2.5)} />
+                    <circle cx={sx} cy={sy} r={9 / view.k} fill="none" stroke="#7c2d12" strokeWidth={fs(1)} />
+                    <rect
+                      x={sx - (spot.name.length * 3.6 + 8) / view.k}
+                      y={sy - 26 / view.k}
+                      width={(spot.name.length * 7.2 + 16) / view.k}
+                      height={15 / view.k}
+                      rx={4 / view.k}
+                      fill="#7c2d12"
+                      fillOpacity={0.92}
+                    />
+                    <text
+                      x={sx} y={sy - 15 / view.k} textAnchor="middle"
+                      fontSize={fs(10.5)} fontWeight={700} fill="#ffffff"
+                    >
+                      {spot.name}
+                    </text>
+                  </g>
+                );
+              })() : null}
+
               <g data-layer="settlements">{onlyUnnamed || mode === "opp" ? null : dotLayer}</g>
               <g data-layer="medical">{mode === "opp" ? null : medicalLayer}</g>
               <g data-layer="pharmacy">{mode === "opp" ? null : pharmacyLayer}</g>

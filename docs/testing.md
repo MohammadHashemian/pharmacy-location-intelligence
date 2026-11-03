@@ -45,6 +45,7 @@ Files:
 | `scoring.test.ts` | population modes, outliers, `scorePlaces` determinism and invariants |
 | `loaders.test.ts` | the three page loaders against the real schema |
 | `api.test.ts` | every route, including the refusal paths (400s) and the regional report |
+| `manual-merge.test.ts` | a hand-pinned pharmacy reaches the dashboard, not only the map |
 | `routes-misc.test.ts` | photo proxy validation, tile zoom bounds, key-check refusals |
 | `tableFilter.test.ts` | column filters: Persian/Latin digits, one-ended and crossed ranges, unknown values never pass a range, substring and pick lists |
 | `llm.test.ts` | provider presets, base-URL normalisation (a pasted `/chat/completions` is accepted), model/key validation, save → mask → clear round trip, legacy `openrouter_*` fallback, and the two LLM routes' 400s |

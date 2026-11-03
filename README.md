@@ -452,6 +452,18 @@ without touching the grid, and the map recolours:
 Ahvaz (1.2 M) is saturated and absent from the «room» ranking, the benchmark dial moves the
 saturated count 83 → 32 and back, and the map draws all four colours.
 
+### Three ways the map and the numbers stay in agreement
+
+1. **A recommended spot is a real pin.** Report links carry `?spot=lat,lon&spotName=…` and the
+   map draws a solid candidate marker — before this the link only centred the view, which read
+   as «nothing happened».
+2. **A hand-pinned pharmacy reaches the dashboard.** `/` reads the FDA snapshot, which knows
+   nothing about a pin somebody dropped; `manualByPlace()` in `lib/data.ts` folds
+   `manual_place` into the place rows (and into the ratio), so عین دو shows ۲ داروخانه after two
+   were added instead of ۰. The map already counted them through `v_map_pharmacy_mapped`.
+3. **Any area can be analysed.** `/report` searches settlements and runs the builder on demand;
+   the map header links to it, and a settlement card opens its own report.
+
 ### Regional report — `etl/area_report.py` → `/report/<area_id>`
 
 Clicking «گزارش منطقه» on any settlement opens one page with everything the tool knows about
@@ -2051,6 +2063,77 @@ run that dies at city 60 resumes at 60 instead of paying for 1…59 again.
   latitude, used only to drop slivers and to sanity-check the outline.
 * 31 شهرستان exist in the administrative tree; one of them (ابوالعباس) has no
   settlement row with a coordinate yet, so its ground shows no dots.
+
+---
+
+## The analytic assistant — ask the data (experimental, `/api/chat`)
+
+Instead of reading the table and judging by eye, ask. A chat box sits in the
+bottom-left corner of every page, and an agent answers **from the same database the
+dashboard reads** — it runs queries itself, then writes the answer.
+
+```
+browser ──POST /api/chat {messages}──► lib/agent.ts ──tools──► lib/agentTools.ts ──► SQLite
+                                          │                        (read-only handle)
+                                          └── chat/completions ──► the model in /settings
+```
+
+**Four tools, and nothing else.** The model cannot invent a metric, only ask for one:
+
+| tool | answers | how |
+|---|---|---|
+| `dataset_overview` | national totals, 31 provinces, data-quality flags, reference coverage, sources | `loadDashboardData()` |
+| `rank_places` | "best place for a pharmacy", filtered by province/county/name/population, sortable | `scorePlaces()` — the dashboard's own model |
+| `schema` | table/view list, or the columns of one | `pragma_table_info` |
+| `query_sql` | everything else: map cells, capacity, POIs, area reports, the yearbook | one `SELECT`/`WITH`, ≤ 200 rows |
+
+`rank_places` deliberately calls the same `scorePlaces()` the board renders, so the
+chat cannot rank a town differently from the table beside it.
+
+**The fence is the connection, not the prompt.** `query_sql` opens its own
+`new DatabaseSync(DB_PATH, { readOnly: true })`, caps the row iterator, and refuses
+anything but a single `SELECT`/`WITH` — a prompt injection that talks the model into
+`DELETE` reaches SQLite as a write on a read-only handle and fails there. The regex
+that rejects `DROP`/`UPDATE`/`PRAGMA` exists for the error message.
+
+**Bounded, and forced to land.** Six tool rounds, at most four calls per round; after
+that the tools are taken away and one last call asks for the answer it already has. A
+chat box that hangs is worse than one that says «بیشتر از این نمیدانم». Empty
+assistant turns, unknown tools and a failing tool all stay in the transcript as a
+failed step instead of crashing the request.
+
+**It shows its work.** Each reply carries chips for the tools it called and how many
+rows came back (`rank_places · 12 ردیف`), so a surprising number can be traced rather
+than believed. Prose is rendered as text with light markdown flattened
+(`format.ts#plainAnswer`) — never as HTML.
+
+**Measured,** one live question — «بین ۵ تا ۲۰ هزار نفر، کدام شهرهای خوزستان کمترین صف
+متقاضی را دارند؟» — `deepseek/deepseek-v4.1-flash-1017`:
+
+```
+steps ..... rank_places {province: خوزستان, min_population: 5000, max_population: 20000,
+            kind: city, sort: pipeline} → 12 ردیف, 3.2 s
+answer .... میانرود (۱۰٬۱۱۰) · بستان (۸٬۴۷۶) · صالح شهر (۷٬۳۰۹), each with its
+            سرانه, امتیاز شانس and the reason it was chosen
+caveat .... ابوحمیظه named as the same queue with a «داروخانهای ثبت نشده» warning
+total ..... 14.7 s · ۸٬۶۵۲ tokens
+```
+
+**Requirements and limits.** The model must support tool calling (`/settings` →
+OpenRouter / OpenAI / 9Router / سفارشی; the legacy `openrouter_*` pair is still read).
+Without a key the panel says so and links to `/settings` instead of failing. Numbers
+come from the database; the prose comes from the model and can be wrong — the panel
+says that too, and the whole feature is one line in `app/layout.tsx` to remove.
+
+`web/tests/agent.test.ts` (23 checks): the fence rejects writes/DDL/two statements,
+200-row cap, the ranking is monotonic and matches the dashboard, province and
+Arabic-letter search, the loop executes → feeds back → answers, a throwing tool is a
+failed step not a crash, tools are removed after the last round, a gateway 500 becomes
+an `AgentError` with its status, no key means 409 and zero network calls.
+
+> Dev note: adding a component with new Tailwind classes to a **running** `next dev`
+> does not always re-scan the new file, and the panel renders unstyled. Touching
+> `globals.css` forces the re-scan; a restart does the same.
 
 ---
 
