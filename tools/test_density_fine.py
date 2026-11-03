@@ -89,6 +89,25 @@ def main() -> int:
               "۸۰۰" in text and "۲۰۰" in text, text.splitlines()[0])
         bands = legend.locator("li").count()
         check("every band is a row of its own", bands >= 4, f"{bands} rows")
+
+        # the card sits over the map, so it has to be closable and stay closed
+        legend.locator("button").first.click()
+        pg.wait_for_timeout(400)
+        pill = pg.locator('[data-legend="map"]')
+        check("the legend collapses to a pill",
+              pill.get_attribute("data-legend-open") == "0", pill.inner_text().splitlines()[-1])
+        check("the pill is a usable tap target",
+              (pill.bounding_box() or {}).get("height", 0) >= 32,
+              str(round((pill.bounding_box() or {}).get("height", 0))))
+        pg.reload(wait_until="domcontentloaded")
+        pg.wait_for_selector('g#scene[data-ready="1"]', timeout=60000)
+        pg.wait_for_timeout(1800)
+        check("it stays closed after a reload",
+              pg.locator('[data-legend="map"]').get_attribute("data-legend-open") == "0")
+        pg.locator('[data-legend="map"]').click()
+        pg.wait_for_timeout(400)
+        check("and opens again",
+              pg.locator('[data-legend="map"]').get_attribute("data-legend-open") == "1")
         fills = pg.evaluate("""() => {
           const out = new Map();
           document.querySelectorAll('g[data-layer="density-fine"] rect').forEach((r) => {

@@ -68,6 +68,8 @@ function mix(a: string, b: string, t: number): string {
   return `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
+const LEGEND_KEY = "khz.legend";
+
 const MAX_ZOOM = 600;
 const RING_EDGES = [25, 50, 75, 100, 150, 200, 300];
 
@@ -4857,12 +4859,70 @@ function LegendCard({
   items: { colour: string; label: string }[];
   note: string;
 }) {
+  /* The card sits over the map, so it must be possible to get it out of the way. The choice is
+     remembered per browser: someone who collapsed it does not want it back on every reload. */
+  const [open, setOpen] = useState(true);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(LEGEND_KEY);
+      if (saved === "closed") setOpen(false);
+    } catch {
+      /* private mode: keep the default */
+    }
+    setReady(true);
+  }, []);
+  const toggle = () => {
+    setOpen((v) => {
+      try {
+        window.localStorage.setItem(LEGEND_KEY, v ? "closed" : "open");
+      } catch {
+        /* ignore */
+      }
+      return !v;
+    });
+  };
+
+  if (!ready) return null;
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        data-legend="map"
+        data-legend-open="0"
+        aria-expanded={false}
+        aria-controls="map-legend"
+        className="pointer-events-auto flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-line-strong bg-surface px-3 py-2 text-[11px] font-medium text-ink shadow-md transition hover:border-accent hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-accent"
+        title="نمایش راهنما"
+      >
+        <span aria-hidden>▦</span> راهنما
+        <span aria-hidden className="text-[11px] leading-none text-faint">▾</span>
+      </button>
+    );
+  }
+
   return (
     <div
+      id="map-legend"
       data-legend="map"
+      data-legend-open="1"
       className="pointer-events-auto w-[200px] max-w-[62vw] rounded-xl border border-line bg-surface/97 px-2.5 py-2 shadow-lg"
     >
-      <div className="text-[11px] font-semibold text-ink">{title}</div>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded
+        aria-controls="map-legend"
+        className="flex min-h-6 w-full cursor-pointer items-center justify-between gap-2 text-right"
+        title="بستن راهنما"
+      >
+        <span className="text-[11px] font-semibold text-ink">{title}</span>
+        <span className="shrink-0 rounded px-1 text-[10px] text-faint hover:text-ink" aria-hidden>
+          ✕
+        </span>
+      </button>
       <ul className="mt-1 space-y-[3px]">
         {items.map((it) => (
           <li key={it.label} className="grid grid-cols-[10px_1fr] items-center gap-x-1.5">
