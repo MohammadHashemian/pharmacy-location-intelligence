@@ -6,7 +6,7 @@
  * A wrong key fails here, not halfway through an ETL run. Never echoes the key.
  */
 import { NextResponse } from "next/server";
-import { apiErrorText, authHeaders, chatUrl, getLlm } from "@/lib/llm";
+import { apiErrorText, authHeaders, chatUrl, getLlm, parseChatPayload } from "@/lib/llm";
 
 export async function POST() {
   const cfg = getLlm();
@@ -26,6 +26,8 @@ export async function POST() {
         model: cfg.model,
         max_tokens: 8,
         temperature: 0,
+        // 9Router streams unless told otherwise, and an SSE body is not JSON
+        stream: false,
         messages: [{ role: "user", content: "Reply with the single word: ok" }],
       }),
       signal: AbortSignal.timeout(30_000),
@@ -49,11 +51,7 @@ export async function POST() {
         detail: apiErrorText(text),
       });
     }
-    const j = JSON.parse(text) as {
-      model?: string;
-      choices?: { message?: { content?: string } }[];
-      usage?: { total_tokens?: number };
-    };
+    const j = parseChatPayload(text);
     const reply = (j.choices?.[0]?.message?.content ?? "").trim().slice(0, 80);
     return NextResponse.json({
       ok: true,

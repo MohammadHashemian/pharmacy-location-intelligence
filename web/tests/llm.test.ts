@@ -3,7 +3,7 @@
  * the legacy-OpenRouter fallback and the two routes that must not go near the network.
  */
 import { describe, expect, it } from "vitest";
-import { LLM_PRESETS, apiErrorText, chatUrl, getLlm, llmStatus, modelsUrl, normalizeBaseUrl, saveLlm } from "@/lib/llm";
+import { LLM_PRESETS, apiErrorText, chatUrl, getLlm, llmStatus, modelsUrl, normalizeBaseUrl, parseChatPayload, saveLlm } from "@/lib/llm";
 import { run } from "@/lib/db";
 import { POST as llmPOST } from "@/app/api/settings/llm/route";
 import { POST as llmTestPOST } from "@/app/api/settings/llm/test/route";
@@ -107,6 +107,47 @@ describe("routes", () => {
     const r = await llmTestPOST();
     expect(r.status).toBe(400);
     expect(((await r.json()) as { error: string }).error).toContain("کلید");
+  });
+});
+
+describe("chat envelope", () => {
+  const answer = '{"choices":[{"message":{"role":"assistant","content":"سلام"}}]}';
+
+  it("reads plain JSON, a JSON body with an SSE trailer, and real chunked SSE", () => {
+    expect(parseChatPayload(answer).choices?.[0]?.message?.content).toBe("سلام");
+    // 9Router answers text/event-stream even when `stream` was never sent
+    expect(parseChatPayload(`${answer}\r\ndata: [DONE]\r\n\r\n`).choices?.[0]?.message?.content).toBe("سلام");
+    const chunks = [
+      'data: {"choices":[{"delta":{"role":"assistant","reasoning_content":"think"}}]}',
+      "",
+      'data: {"choices":[{"delta":{"content":"سلا"}}]}',
+      "",
+      'data: {"choices":[{"delta":{"content":"م"}}]}',
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    expect(parseChatPayload(chunks).choices?.[0]?.message?.content).toBe("سلام");
+  });
+
+  it("merges streamed tool_calls by index so the loop can still call the tool", () => {
+    const chunks = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"rank_places","arguments":""}}]}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"limit\\":5}"}}]}}]}',
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const msg = parseChatPayload(chunks).choices?.[0]?.message;
+    expect(msg?.content).toBeNull();
+    expect(msg?.tool_calls?.[0]).toMatchObject({
+      id: "call_1",
+      function: { name: "rank_places", arguments: '{"limit":5}' },
+    });
+  });
+
+  it("throws on a body that is not a chat answer at all", () => {
+    expect(() => parseChatPayload("I think this is a pharmacy.")).toThrow();
+    expect(() => parseChatPayload("")).toThrow();
   });
 });
 

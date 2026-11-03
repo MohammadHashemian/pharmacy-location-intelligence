@@ -1204,6 +1204,11 @@ model, prompt_v)`, keyed by model, so a re-run costs nothing. `--apply` touches 
 `confidence >= 0.85`: a pharmacy judged to be a doctor's office moves to the medical
 layer, `irrelevant` is deleted, everything else waits.
 
+Some gateways — 9Router among them — stream by default, so a body read as JSON fails
+with a perfectly good answer inside it. Every chat request pins `stream: false`, and
+`parseChatPayload` (`web/src/lib/llm.ts`) also accepts an SSE-trailed body or real
+chunks, merging deltas and tool calls, so a router that ignores the flag still works.
+
 `GET /api/settings/llm/models` lists the saved gateway's catalogue, and
 `POST /api/settings/llm/test` makes one 8-token chat call — so a wrong key or a model
 id the gateway does not route fails on the settings page instead of halfway through a

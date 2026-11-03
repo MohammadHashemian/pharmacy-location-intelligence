@@ -60,7 +60,8 @@ src/components/*.tsx       client components; receive plain JSON only
 * **Settings** — `lib/settings.ts` (map keys) and `lib/llm.ts` (provider → base URL → model →
   key) are the only readers of `app_setting`. Both return a masked status to the browser, and
   `classify_with_llm.py` resolves the same `llm_*` rows, with the legacy `openrouter_*` pair as
-  a fallback.
+  a fallback. Chat bodies always set `stream: false` (9Router streams otherwise) and every
+  reader parses tolerantly — plain JSON, a JSON body with `data: [DONE]`, or real SSE chunks.
 * **Loaders** (`loadDashboardData`, `loadMapData`, `loadAdminData`) run SQL and return plain
   objects. `node:sqlite` returns null-prototype rows, so `lib/db.ts` re-homes every row onto
   `Object.prototype` before it crosses the server → client boundary.
@@ -75,6 +76,12 @@ src/components/*.tsx       client components; receive plain JSON only
   the prose, and its text is post-processed so no `key=value` leaks into a Persian page.
 * **Big computed surfaces are fetched per viewport** (`/api/density?bbox=…`) rather than shipped
   with the page: 80,000 cells would triple the payload to draw a corner of it.
+* **Analytic assistant (experimental)**: `POST /api/chat` runs a bounded tool loop
+  (`lib/agent.ts`) over four read-only tools (`lib/agentTools.ts`) — overview, the
+  dashboard's own `scorePlaces()` ranking, schema, and one capped `SELECT`. The model
+  writes prose only; every number comes from the database, and `query_sql` opens a
+  separate `readOnly` connection, so a bad instruction cannot write. Replies carry the
+  tool trace, and `web/tests/agent.test.ts` proves the fence and the loop.
 * **Table filters are client state over the rows already shipped** (`lib/tableFilter.ts` +
   `PlacesTable`). Clicking a header opens a panel with an `از/تا` range (numeric columns) or a
   substring + value pick list (text columns); it narrows the visible list only, so the score and

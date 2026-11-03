@@ -147,10 +147,51 @@ def parse(raw: str) -> list[dict]:
     return out
 
 
+def payload(raw: str) -> dict:
+    """One chat answer, whatever envelope the gateway sent.
+
+    `stream: false` is sent below, but 9Router (and routers built on a streaming
+    core) answer `text/event-stream` anyway: the body becomes `{…json…}\r\ndata:
+    [DONE]`, or real SSE chunks. A bare `json.loads` fails on the trailer, which
+    surfaced as «پاسخ دروازه JSON معتبر نبود» with a valid answer inside.
+    """
+    text = raw.strip()
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text)   # ignores a `data: [DONE]` trailer
+        return obj
+    except json.JSONDecodeError:
+        pass
+    full: dict | None = None
+    content = ""
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        chunk = line[5:].strip()
+        if not chunk or chunk == "[DONE]":
+            continue
+        try:
+            o = json.loads(chunk)
+        except json.JSONDecodeError:
+            continue
+        ch = (o.get("choices") or [{}])[0]
+        if ch.get("message"):
+            full = ch["message"]
+        d = ch.get("delta") or {}
+        if d.get("content"):
+            content += d["content"]
+    if full:
+        return {"choices": [{"message": full}]}
+    if content:
+        return {"choices": [{"message": {"role": "assistant", "content": content}}]}
+    raise ValueError("gateway answer was not a chat completion")
+
+
 def ask(base: str, key: str, model: str, items: list[dict], timeout: int = 120) -> str:
     body = json.dumps({
         "model": model,
         "temperature": 0,
+        "stream": False,        # 9Router streams by default; an SSE body is not JSON
         "messages": [
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": json.dumps(
@@ -165,7 +206,7 @@ def ask(base: str, key: str, model: str, items: list[dict], timeout: int = 120) 
         headers["X-Title"] = "pharmacy-location-intelligence"
     req = urllib.request.Request(f"{base}/chat/completions", data=body, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = json.loads(r.read())
+        data = payload(r.read().decode("utf-8", "replace"))
     return data["choices"][0]["message"]["content"]
 
 
@@ -234,7 +275,23 @@ def check() -> int:
     except ValueError:
         pass
     assert len(SYSTEM) > 200 and "pharmacy" in SYSTEM
-    print("check: parser + prompt OK")
+
+    # gateway envelopes: plain JSON, a JSON body with an SSE trailer, real chunks
+    plain = '{"choices":[{"message":{"role":"assistant","content":"سلام"}}]}'
+    assert payload(plain)["choices"][0]["message"]["content"] == "سلام"
+    hybrid = plain + "\r\ndata: [DONE]\r\n\r\n"
+    assert payload(hybrid)["choices"][0]["message"]["content"] == "سلام"
+    chunks = ('data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
+              'data: {"choices":[{"delta":{"content":"سلا"}}]}\n\n'
+              'data: {"choices":[{"delta":{"content":"م"}}]}\n\n'
+              'data: [DONE]\n')
+    assert payload(chunks)["choices"][0]["message"]["content"] == "سلام"
+    try:
+        payload("I think this is a pharmacy.")
+        raise AssertionError("should have raised")
+    except ValueError:
+        pass
+    print("check: parser + prompt + gateway envelopes OK")
     return 0
 
 

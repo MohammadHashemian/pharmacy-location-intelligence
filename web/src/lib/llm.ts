@@ -133,6 +133,102 @@ export function apiErrorText(raw: string): string {
   return raw.slice(0, 300);
 }
 
+export type LlmToolCall = {
+  id: string;
+  type?: string;
+  function: { name: string; arguments?: string };
+};
+
+export type LlmMessage = {
+  role?: string;
+  content?: string | null;
+  reasoning_content?: string;
+  tool_calls?: LlmToolCall[];
+};
+
+export type LlmEnvelope = {
+  model?: string;
+  choices?: { message?: LlmMessage }[];
+  usage?: { total_tokens?: number };
+};
+
+/** Merges chunked deltas, the shape a streaming gateway sends. */
+function mergeDeltas(text: string): LlmEnvelope | null {
+  let model: string | undefined;
+  let tokens: number | undefined;
+  let content = "";
+  let last: LlmMessage | null = null;
+  const calls: LlmToolCall[] = [];
+
+  for (const line of text.split(/\r?\n/)) {
+    const chunk = line.startsWith("data:") ? line.slice(5).trim() : "";
+    if (!chunk || chunk === "[DONE]") continue;
+    let o: LlmEnvelope & {
+      choices?: { message?: LlmMessage; delta?: Partial<LlmMessage> & { tool_calls?: (LlmToolCall & { index?: number })[] } }[];
+    };
+    try {
+      o = JSON.parse(chunk);
+    } catch {
+      continue;
+    }
+    if (o.model) model = o.model;
+    if (o.usage?.total_tokens) tokens = o.usage.total_tokens;
+    const ch = o.choices?.[0];
+    if (!ch) continue;
+    if (ch.message) last = ch.message; // a full message wins over any deltas
+    const delta = ch.delta;
+    if (!delta) continue;
+    if (delta.content) content += delta.content;
+    for (const tc of delta.tool_calls ?? []) {
+      const i = tc.index ?? calls.length;
+      const slot = (calls[i] ??= { id: tc.id ?? `call_${i}`, type: "function", function: { name: "", arguments: "" } });
+      if (tc.id) slot.id = tc.id;
+      if (tc.function?.name) slot.function.name += tc.function.name;
+      if (tc.function?.arguments) slot.function.arguments += tc.function.arguments;
+    }
+  }
+
+  const message = last ?? (content || calls.length ? { role: "assistant", content: content || null, tool_calls: calls.length ? calls : undefined } : null);
+  if (!message) return null;
+  return { model, usage: tokens ? { total_tokens: tokens } : undefined, choices: [{ message }] };
+}
+
+/**
+ * Reads a chat answer whatever envelope the gateway chose.
+ *
+ * 9Router (and any router built on a streaming core) answers `text/event-stream`
+ * even when `stream` was never set — the body is then `{…json…}\r\ndata: [DONE]`,
+ * which `JSON.parse` rejects. Every caller sends `stream: false`, but the reader
+ * stays tolerant: plain JSON, a JSON body with SSE trailers, or real chunked SSE.
+ */
+export function parseChatPayload(raw: string): LlmEnvelope {
+  const body = raw.trim();
+  if (!body) throw new Error("empty answer");
+
+  // hybrid body: a complete object followed by `data: [DONE]`
+  const stripped = body.replace(/^data:.*$/gm, "").trim();
+  try {
+    return JSON.parse(stripped) as LlmEnvelope;
+  } catch {
+    /* streamed or malformed */
+  }
+
+  const merged = mergeDeltas(body);
+  if (merged) return merged;
+
+  // a bare chunk stream may put several objects on one line without `data:` prefixes
+  const firstBrace = body.indexOf("{");
+  const lastBrace = body.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(body.slice(firstBrace, lastBrace + 1)) as LlmEnvelope;
+    } catch {
+      /* fall through */
+    }
+  }
+  throw new Error("not a chat answer");
+}
+
 export function getLlm(): LlmConfig {
   ensureTable();
   const rows = all<{ key: string; value: string }>(
