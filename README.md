@@ -17,6 +17,34 @@ the next page load.
 
 ---
 
+## Develop
+
+```bash
+# the app
+cd web
+npm install
+npm run dev            # http://localhost:3737  (map at /map)
+
+# tests
+npm run test           # unit suite, 103 tests, ~6 s
+npm run test:coverage  # 84 % lines · 83 % statements · 87 % functions
+npm run typecheck
+npm run build
+
+# end-to-end (needs the dev server running)
+cd ..
+python tools/test_decision_flow.py
+python tools/test_density_fine.py
+```
+
+Read before changing anything:
+
+* **`docs/architecture.md`** — the three layers, which tables are derived and which are
+  user-owned, and the invariants that must stay true.
+* **`docs/testing.md`** — how coverage is measured, and the fixture rule that stops a test from
+  deleting the owner's annotations.
+* **`tools/dead_code.py`** — lists source files nothing imports, so the tree can be kept honest.
+
 ## Quick start
 
 ```bash
@@ -34,7 +62,7 @@ python etl/load_salname.py             # county-level official figures
 python etl/crosscheck_salname.py       # FDA vs the province's own counts
 
 # 4. run the dashboard
-cd web && npm install && npm run dev     # http://localhost:3000
+cd web && npm install && npm run dev     # http://localhost:3737
 ```
 
 Manually re-apply the schema and views after adding a table (the loaders do this

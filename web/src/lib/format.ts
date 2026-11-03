@@ -19,10 +19,6 @@ export function toPersianDigits(s: string | number): string {
   return String(s).replace(/[0-9]/g, (d) => PERSIAN[LATIN.indexOf(d)]);
 }
 
-export function toLatinDigits(s: string | number): string {
-  return String(s).replace(/[۰-۹]/g, (d) => LATIN[PERSIAN.indexOf(d)]);
-}
-
 /** Integer with thousands grouping, in Persian digits. */
 export function group(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
@@ -32,22 +28,10 @@ export function group(n: number | null | undefined): string {
   );
 }
 
-/** Machine-readable integer (for CSV / copy-paste). */
-export function groupRaw(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "";
-  return n.toLocaleString("en-US");
-}
-
 /** Fixed-decimal number, Persian digits and Persian decimal separator. */
 export function num(n: number | null | undefined, digits = 1): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   return toPersianDigits(n.toFixed(digits)).replace(".", FA_DECIMAL);
-}
-
-/** Machine-readable fixed-decimal. */
-export function numRaw(n: number | null | undefined, digits = 1): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return "";
-  return n.toFixed(digits);
 }
 
 /** Rial amounts, Persian digits, compacted for readability. */

@@ -6,12 +6,7 @@
  * so the snapshot stamp is converted rather than transliterated.
  */
 
-const LATIN = "0123456789";
-const PERSIAN = "۰۱۲۳۴۵۶۷۸۹";
-
-export function faDigits(s: string | number): string {
-  return String(s).replace(/[0-9]/g, (d) => PERSIAN[LATIN.indexOf(d)]);
-}
+import { toPersianDigits as faDigits } from "@/lib/format";
 
 const div = (a: number, b: number) => Math.trunc(a / b);
 
@@ -78,15 +73,4 @@ export function jalaliFromIso(iso: string | null | undefined): string {
     tehran.getUTCDate(),
   );
   return `${faDigits(jd)} ${MONTHS[jm - 1]} ${faDigits(jy)}`;
-}
-
-/** Full stamp: "۱۸ مهر ۱۴۰۵ — ۱۲:۴۶ به وقت تهران" */
-export function jalaliStamp(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  const tehran = new Date(d.getTime() + 3.5 * 3600 * 1000);
-  const hh = String(tehran.getUTCHours()).padStart(2, "0");
-  const mm = String(tehran.getUTCMinutes()).padStart(2, "0");
-  return `${jalaliFromIso(iso)} — ${faDigits(hh)}:${faDigits(mm)} به وقت تهران`;
 }

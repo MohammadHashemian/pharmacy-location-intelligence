@@ -12,6 +12,7 @@ __pycache__/
 
 # databases (rebuild with: bash etl/rebuild.sh)
 db/*.sqlite
+db/snapshots/
 db/*.sqlite-wal
 db/*.sqlite-shm
 data/pharmacy.sqlite

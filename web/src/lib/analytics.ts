@@ -447,41 +447,6 @@ export function isUnresolvedOutlier(
   return !(hasOverride || hasRef);
 }
 
-/**
- * Human-readable Persian text for each ingest-time flag.
- *
- * HARD flags (pop_outlier, pop_zero, bad_name) remove a row from the ranking —
- * a wrong population makes its density, and therefore its entire score,
- * meaningless. SOFT flags (no_activity) only badge it: the row is still a real
- * candidate, but the user has to check it on the ground before trusting it.
- */
-export const DQ_LABELS: Record<string, string> = {
-  pop_outlier:
-    "جمعیت مشکوک: احتمالاً جمعیت کلان‌شهر روی این آبادی نشسته است (سد: کنار گذاشته شد)",
-  pop_zero: "جمعیت صفر یا خالی در منبع (سد: کنار گذاشته شد)",
-  bad_name: "نام آبادی در منبع ناقص است، مثل «**» (سد: کنار گذاشته شد)",
-  no_activity:
-    "در منبع هیچ داروخانه و هیچ متقاضی‌ای ثبت نشده؛ پیش از اعتماد میدانی بررسی کنید",
-  no_fda_data:
-    "دادهٔ FDA ندارد: این مکان اصلاً در فید نبوده؛ تعداد داروخانه نامشخص است و خودتان باید بررسی کنید",
-};
-
-export const SOFT_FLAGS = new Set(["no_activity", "no_fda_data"]);
-
-export function dqFlagList(
-  flags: string | null,
-): { code: string; text: string; soft: boolean }[] {
-  return (flags ?? "")
-    .split(",")
-    .filter(Boolean)
-    .map((code) => ({
-      code,
-      text: DQ_LABELS[code] ?? code,
-      soft: SOFT_FLAGS.has(code),
-    }));
-}
-
-/** Component scores, each 0..100 (100 = most attractive). */
 export interface ScoreBreakdown {
   demand: number;
   headroom: number;

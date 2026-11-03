@@ -285,35 +285,6 @@ export function Button({
   );
 }
 
-/* ------------------------------------------------------------- Chip set --- */
-export function Chips<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: { id: T; label: string }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-1">
-      {options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          onClick={() => onChange(o.id)}
-          className={`rounded-lg border px-2 py-1 text-[11px] font-medium transition ${
-            value === o.id
-              ? "border-brand/40 bg-brand-soft text-brand-ink"
-              : "border-line bg-surface text-muted hover:border-line-strong hover:text-ink"
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /* --------------------------------------------------------------- Legend --- */
 export function Legend({

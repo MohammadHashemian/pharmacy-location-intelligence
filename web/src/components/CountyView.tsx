@@ -6,7 +6,6 @@ import {
   group,
   num,
   shortCounty,
-  shortDistrict,
   shortPlace,
 } from "@/lib/format";
 import { scoreColor } from "./Charts";
@@ -456,14 +455,3 @@ export function WhiteSpace({
   );
 }
 
-export function districtBreakdown(rows: ScoredPlace[]) {
-  const m = new Map<string, number>();
-  rows.forEach((r) => m.set(r.district, (m.get(r.district) ?? 0) + 1));
-  return [...m.entries()]
-    .map(([district, n]) => ({
-      district,
-      n: group(n),
-      label: shortDistrict(district),
-    }))
-    .sort((a, b) => b.district.localeCompare(a.district));
-}
